@@ -51,5 +51,10 @@ namespace PlayGif
             errors = new List<string>();
             return true;
         }
+
+        public void BulkFetchSteamDescriptions()
+        {
+            _plugin.RunBulkSteamFetch();
+        }
     }
 }

@@ -83,7 +83,15 @@ namespace PlayGif
                 }
 
                 var isFullscreen = _api.ApplicationInfo.Mode == ApplicationMode.Fullscreen;
-                Logger.Info($"Mode: {(isFullscreen ? "Fullscreen" : "Desktop")}. Services prepared. Waiting for visual tree injection.");
+                Logger.Info($"Mode: {(isFullscreen ? "Fullscreen" : "Desktop")}. Services prepared.");
+
+                if (isFullscreen && !Settings.EnableInFullscreen)
+                {
+                    Logger.Info("Fullscreen mode disabled in settings. Plugin inactive.");
+                    return;
+                }
+
+                Logger.Info("Waiting for visual tree injection.");
 
                 // If a game was already selected, trigger injection + init
                 // But in fullscreen, wait for OnFullscreenViewChanged(Details) instead
@@ -356,6 +364,49 @@ namespace PlayGif
             });
 
             return items;
+        }
+
+        #endregion
+
+        #region Bulk Fetch
+
+        internal void RunBulkSteamFetch()
+        {
+            if (_steamService == null)
+            {
+                // Service not initialized yet — create a temporary one for the fetch
+                var basePath = GetPluginUserDataPath();
+                _steamService = new SteamDescriptionService(basePath);
+            }
+
+            var allGames = _api.Database.Games.ToList();
+            var resolvable = allGames.Where(g => _steamService.ResolveSteamAppId(g) != null).ToList();
+            var alreadyCached = resolvable.Count(g => _steamService.HasCachedDescription(g.Id));
+            var toFetch = resolvable.Count - alreadyCached;
+
+            var result = _api.Dialogs.ShowMessage(
+                $"Found {resolvable.Count} games with Steam AppIds.\n" +
+                $"Already cached: {alreadyCached}\n" +
+                $"To fetch: {toFetch}\n\n" +
+                "This may take a while depending on library size. Continue?",
+                Constants.PluginName,
+                System.Windows.MessageBoxButton.YesNo);
+
+            if (result != System.Windows.MessageBoxResult.Yes) return;
+
+            var cts = new System.Threading.CancellationTokenSource();
+            var task = _steamService.BulkFetchAsync(resolvable, _api, cts.Token);
+            task.ContinueWith(t =>
+            {
+                if (t.IsCompleted && !t.IsFaulted)
+                {
+                    var (fetched, skipped, failed) = t.Result;
+                    Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+                        _api.Dialogs.ShowMessage(
+                            $"Fetch complete!\n\nFetched: {fetched}\nFailed: {failed}",
+                            Constants.PluginName)));
+                }
+            });
         }
 
         #endregion

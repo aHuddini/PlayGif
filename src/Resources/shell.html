@@ -120,15 +120,21 @@
     }).observe(document.getElementById('content'), { childList: true, subtree: true });
 
     // Forward scroll to WPF parent when at top/bottom edge (desktop mode)
+    // Throttled to prevent flooding postMessage which can stall the renderer
+    var _scrollThrottled = false;
     window.addEventListener('wheel', function(e) {
+        if (_fullscreenMode || _scrollThrottled) return;
+
         var atTop = window.scrollY <= 0;
         var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 2;
 
         if ((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom)) {
+            _scrollThrottled = true;
             window.chrome.webview.postMessage(JSON.stringify({
                 type: 'scroll',
                 delta: e.deltaY
             }));
+            setTimeout(function() { _scrollThrottled = false; }, 250);
         }
     }, { passive: true });
 </script>

@@ -62,7 +62,8 @@ Write-Host "Copying extension files..." -ForegroundColor Yellow
 $coreFiles = @(
     (Join-Path $projectRoot "extension.yaml"),
     (Join-Path $projectRoot "icon.png"),
-    (Join-Path $projectRoot "LICENSE")
+    (Join-Path $projectRoot "LICENSE"),
+    (Join-Path $projectRoot "THIRD-PARTY-NOTICES")
 )
 foreach ($file in $coreFiles) {
     if (Test-Path $file) {

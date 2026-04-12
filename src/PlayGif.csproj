@@ -45,5 +45,8 @@
         <None Include="..\LICENSE" Condition="Exists('..\LICENSE')">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
+        <None Include="..\THIRD-PARTY-NOTICES" Condition="Exists('..\THIRD-PARTY-NOTICES')">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
     </ItemGroup>
 </Project>

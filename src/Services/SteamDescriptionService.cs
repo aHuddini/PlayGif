@@ -1,6 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Net;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using Playnite.SDK;
@@ -14,9 +18,11 @@ namespace PlayGif.Services
         private static readonly ILogger Logger = LogManager.GetLogger();
         private static readonly HttpClient HttpClient = new HttpClient();
 
-        // Steam library plugin GUID (built-in)
         private static readonly Guid SteamPluginId =
             Guid.Parse("CB91DFC9-B977-43BF-8E70-55F46E410FAB");
+
+        private const int MaxRetries = 10;
+        private const int RetryDelayMs = 2500;
 
         private readonly string _cacheBasePath;
 
@@ -26,14 +32,11 @@ namespace PlayGif.Services
             Directory.CreateDirectory(_cacheBasePath);
         }
 
-        // Get the rich description for a game — from cache or Steam API
         public async Task<string> GetRichDescriptionAsync(Game game)
         {
-            // Check local cache first
             var cached = LoadCachedDescription(game.Id);
             if (cached != null) return cached;
 
-            // Resolve Steam AppId
             var appId = ResolveSteamAppId(game);
             if (string.IsNullOrEmpty(appId))
             {
@@ -41,8 +44,7 @@ namespace PlayGif.Services
                 return null;
             }
 
-            // Fetch from Steam API
-            var html = await FetchSteamDescriptionAsync(appId);
+            var html = await FetchWithRetryAsync(appId);
             if (!string.IsNullOrEmpty(html))
             {
                 SaveCachedDescription(game.Id, html);
@@ -52,7 +54,79 @@ namespace PlayGif.Services
             return html;
         }
 
-        private string ResolveSteamAppId(Game game)
+        // Bulk fetch for all resolvable games in the library
+        public async Task<(int fetched, int skipped, int failed)> BulkFetchAsync(
+            IEnumerable<Game> games, IPlayniteAPI api, CancellationToken ct)
+        {
+            var toFetch = new List<(Game game, string appId)>();
+
+            foreach (var game in games)
+            {
+                if (ct.IsCancellationRequested) break;
+
+                // Skip if already cached
+                if (LoadCachedDescription(game.Id) != null) continue;
+
+                var appId = ResolveSteamAppId(game);
+                if (!string.IsNullOrEmpty(appId))
+                {
+                    toFetch.Add((game, appId));
+                }
+            }
+
+            if (toFetch.Count == 0)
+            {
+                return (0, 0, 0);
+            }
+
+            Logger.Info($"Bulk fetch: {toFetch.Count} games to fetch.");
+
+            int fetched = 0;
+            int failed = 0;
+            var globalProgress = api.Dialogs.ActivateGlobalProgress((progressArgs) =>
+            {
+                progressArgs.ProgressMaxValue = toFetch.Count;
+
+                for (int i = 0; i < toFetch.Count; i++)
+                {
+                    if (progressArgs.CancelToken.IsCancellationRequested || ct.IsCancellationRequested)
+                        break;
+
+                    var (game, appId) = toFetch[i];
+                    progressArgs.Text = $"Fetching description for: {game.Name} ({i + 1}/{toFetch.Count})";
+
+                    try
+                    {
+                        var html = FetchWithRetryAsync(appId).GetAwaiter().GetResult();
+                        if (!string.IsNullOrEmpty(html))
+                        {
+                            SaveCachedDescription(game.Id, html);
+                            fetched++;
+                        }
+                        else
+                        {
+                            failed++;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error(ex, $"Bulk fetch failed for: {game.Name} (AppId: {appId})");
+                        failed++;
+                    }
+
+                    progressArgs.CurrentProgressValue = i + 1;
+                }
+            }, new GlobalProgressOptions($"Fetching Steam descriptions (0/{toFetch.Count})...", true)
+            {
+                IsIndeterminate = false
+            });
+
+            int skipped = toFetch.Count - fetched - failed;
+            Logger.Info($"Bulk fetch complete: {fetched} fetched, {failed} failed, {skipped} skipped.");
+            return (fetched, skipped, failed);
+        }
+
+        public string ResolveSteamAppId(Game game)
         {
             // For Steam library games, GameId IS the AppId
             if (game.PluginId == SteamPluginId && !string.IsNullOrEmpty(game.GameId))
@@ -78,33 +152,58 @@ namespace PlayGif.Services
                 }
             }
 
-            // TODO: future enhancement — cross-match by name via Steam search API
             return null;
         }
 
-        private async Task<string> FetchSteamDescriptionAsync(string appId)
+        // Fetch with retry on HTTP 429 (rate limiting), matching UniversalSteamMetadata pattern
+        private async Task<string> FetchWithRetryAsync(string appId)
         {
-            try
+            for (int attempt = 0; attempt < MaxRetries; attempt++)
             {
-                var url = $"https://store.steampowered.com/api/appdetails?appids={appId}";
-                var response = await HttpClient.GetStringAsync(url);
-
-                var json = JObject.Parse(response);
-                var appData = json[appId];
-                if (appData == null || appData["success"]?.Value<bool>() != true)
+                try
                 {
-                    Logger.Info($"Steam API returned no data for AppId: {appId}");
+                    var url = $"https://store.steampowered.com/api/appdetails?appids={appId}";
+                    var response = await HttpClient.GetAsync(url);
+
+                    if (response.StatusCode == (HttpStatusCode)429)
+                    {
+                        Logger.Info($"Rate limited (429) for AppId {appId}, retry {attempt + 1}/{MaxRetries}...");
+                        await Task.Delay(RetryDelayMs);
+                        continue;
+                    }
+
+                    response.EnsureSuccessStatusCode();
+                    var content = await response.Content.ReadAsStringAsync();
+
+                    var json = JObject.Parse(content);
+                    var appData = json[appId];
+                    if (appData == null || appData["success"]?.Value<bool>() != true)
+                    {
+                        Logger.Info($"Steam API returned no data for AppId: {appId}");
+                        return null;
+                    }
+
+                    return appData["data"]?["about_the_game"]?.Value<string>();
+                }
+                catch (HttpRequestException ex) when (attempt < MaxRetries - 1)
+                {
+                    Logger.Info($"HTTP error for AppId {appId}, retry {attempt + 1}: {ex.Message}");
+                    await Task.Delay(RetryDelayMs);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, $"Failed to fetch Steam description for AppId: {appId}");
                     return null;
                 }
+            }
 
-                var description = appData["data"]?["about_the_game"]?.Value<string>();
-                return description;
-            }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, $"Failed to fetch Steam description for AppId: {appId}");
-                return null;
-            }
+            Logger.Error($"Max retries reached for AppId: {appId}");
+            return null;
+        }
+
+        public bool HasCachedDescription(Guid gameId)
+        {
+            return File.Exists(GetDescriptionCachePath(gameId));
         }
 
         #region Cache

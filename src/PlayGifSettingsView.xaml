@@ -8,6 +8,11 @@
                   IsChecked="{Binding Settings.EnableAnimatedDescriptions}"
                   Margin="0,5,0,5"/>
 
+        <CheckBox Content="Enable in fullscreen mode (experimental)"
+                  IsChecked="{Binding Settings.EnableInFullscreen}"
+                  Margin="0,5,0,5"
+                  IsEnabled="{Binding Settings.EnableAnimatedDescriptions}"/>
+
         <CheckBox Content="Auto-cache media for offline use"
                   IsChecked="{Binding Settings.AutoCacheMedia}"
                   Margin="0,5,0,5"
@@ -19,6 +24,16 @@
                      Width="60" VerticalAlignment="Center"
                      IsEnabled="{Binding Settings.AutoCacheMedia}"/>
         </StackPanel>
+
+        <Separator Margin="0,15,0,15"/>
+
+        <TextBlock Text="Steam Descriptions" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
+        <TextBlock Text="Fetch rich descriptions with animated content directly from Steam store pages."
+                   TextWrapping="Wrap" Margin="0,0,0,8" Opacity="0.7"/>
+        <Button Content="Fetch Steam descriptions for all games"
+                Click="BulkFetchButton_Click"
+                HorizontalAlignment="Left"
+                Padding="12,6" Margin="0,0,0,5"/>
 
         <Separator Margin="0,15,0,15"/>
 

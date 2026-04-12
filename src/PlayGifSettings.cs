@@ -28,6 +28,13 @@ namespace PlayGif
             set { maxCachePerGameMB = value; OnPropertyChanged(nameof(MaxCachePerGameMB)); }
         }
 
+        private bool enableInFullscreen = false;
+        public bool EnableInFullscreen
+        {
+            get => enableInFullscreen;
+            set { enableInFullscreen = value; OnPropertyChanged(nameof(EnableInFullscreen)); }
+        }
+
         private bool enableDebugMode = false;
         public bool EnableDebugMode
         {
