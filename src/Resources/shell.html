@@ -28,11 +28,13 @@
         max-width: 100%;
         height: auto;
         display: block;
+        margin: 5px auto;
     }
     #content video {
         max-width: 100%;
         height: auto;
         display: block;
+        margin: 5px auto;
     }
     #content a {
         color: var(--link-color);
@@ -123,9 +125,20 @@
 
     function setVideoScale(pct) {
         var maxW = Math.max(10, Math.min(100, pct)) + '%';
+        var els = document.querySelectorAll('#content video, #content img');
+        for (var i = 0; i < els.length; i++) {
+            els[i].style.maxWidth = maxW;
+            els[i].style.margin = '5px auto';
+        }
+        setTimeout(reportHeight, 100);
+    }
+
+    function setMaxVideoHeight(px) {
         var videos = document.querySelectorAll('#content video');
         for (var i = 0; i < videos.length; i++) {
-            videos[i].style.maxWidth = maxW;
+            videos[i].style.maxHeight = px > 0 ? (px + 'px') : '';
+            videos[i].style.objectFit = px > 0 ? 'contain' : '';
+            videos[i].style.margin = '5px auto';
         }
         setTimeout(reportHeight, 100);
     }

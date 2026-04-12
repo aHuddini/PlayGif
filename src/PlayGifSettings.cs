@@ -42,18 +42,18 @@ namespace PlayGif
             set { useVideoPosterOnly = value; OnPropertyChanged(nameof(UseVideoPosterOnly)); }
         }
 
+        private int maxVideoHeight = 0;
+        public int MaxVideoHeight
+        {
+            get => maxVideoHeight;
+            set { maxVideoHeight = value; OnPropertyChanged(nameof(MaxVideoHeight)); }
+        }
+
         private int videoScale = 100;
         public int VideoScale
         {
             get => videoScale;
             set { videoScale = value; OnPropertyChanged(nameof(VideoScale)); }
-        }
-
-        private string giphyApiKey = "";
-        public string GiphyApiKey
-        {
-            get => giphyApiKey;
-            set { giphyApiKey = value; OnPropertyChanged(nameof(GiphyApiKey)); }
         }
 
         private bool enableDebugMode = false;

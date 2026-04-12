@@ -295,6 +295,7 @@ namespace PlayGif
                 }
 
                 html = _cacheService.RewriteDescriptionHtml(html, game.Id);
+                Logger.Info($"After rewrite: playgif.local present: {html.Contains(Common.Constants.VirtualHostName)}");
 
                 _ = _renderer.SetDescriptionAsync(html);
                 UpdateThemeColors();
@@ -305,6 +306,12 @@ namespace PlayGif
                 {
                     _ = _renderer.WebViewControl.CoreWebView2.ExecuteScriptAsync(
                         $"setVideoScale({scale})");
+                }
+
+                if (Settings.MaxVideoHeight > 0 && _renderer.IsInitialized)
+                {
+                    _ = _renderer.WebViewControl.CoreWebView2.ExecuteScriptAsync(
+                        $"setMaxVideoHeight({Settings.MaxVideoHeight})");
                 }
             }
             catch (Exception ex)
@@ -404,7 +411,7 @@ namespace PlayGif
             try
             {
                 var uri = new Uri(url);
-                var fileName = System.IO.Path.GetFileName(uri.AbsolutePath);
+                var fileName = SanitizeFileName(System.IO.Path.GetFileName(uri.AbsolutePath));
                 if (string.IsNullOrEmpty(fileName) || !fileName.Contains("."))
                     fileName = "media" + (url.Contains(".webm") ? ".webm" : url.Contains(".gif") ? ".gif" : ".mp4");
 
@@ -442,7 +449,7 @@ namespace PlayGif
             try
             {
                 var uri = new Uri(url);
-                var fileName = System.IO.Path.GetFileName(uri.AbsolutePath);
+                var fileName = SanitizeFileName(System.IO.Path.GetFileName(uri.AbsolutePath));
                 if (string.IsNullOrEmpty(fileName) || !fileName.Contains("."))
                     fileName = "media" + (url.Contains(".webm") ? ".webm" : url.Contains(".gif") ? ".gif" : ".mp4");
 
@@ -478,86 +485,108 @@ namespace PlayGif
             }
         }
 
-        private void SearchAndAddGif(Game game, string position)
+
+        private void SearchWebImages(Game game, string position)
         {
-            // First get search query from user
             var input = _api.Dialogs.SelectString(
-                "Search for GIFs:", Constants.PluginName, game.Name);
+                "Search for images/GIFs:", Constants.PluginName, $"{game.Name} gif");
             if (input == null || !input.Result || string.IsNullOrWhiteSpace(input.SelectedString))
                 return;
 
-            // Search GIPHY
+            var searchTerm = input.SelectedString.Trim();
             var imageOptions = new System.Collections.Generic.List<ImageFileOption>();
-            // Store full-size URLs keyed by thumbnail path
             var fullUrls = new System.Collections.Generic.Dictionary<string, string>();
 
             try
             {
-                var apiKey = Settings.GiphyApiKey;
-                var encoded = Uri.EscapeDataString(input.SelectedString.Trim());
-                var url = $"https://api.giphy.com/v1/gifs/search?api_key={apiKey}&q={encoded}&limit=25&rating=g";
-
-                using (var client = new System.Net.Http.HttpClient())
+                using (var webView = _api.WebViews.CreateOffscreenView())
                 {
-                    var response = client.GetStringAsync(url).GetAwaiter().GetResult();
-                    var json = Newtonsoft.Json.Linq.JObject.Parse(response);
-                    var data = json["data"] as Newtonsoft.Json.Linq.JArray;
+                    var searchUrl = $"https://www.google.com/search?tbm=isch&q={Uri.EscapeDataString(searchTerm)}&safe=on";
+                    webView.NavigateAndWait(searchUrl);
 
-                    if (data != null)
+                    // Handle Google consent form
+                    var currentUrl = webView.GetCurrentAddress();
+                    if (currentUrl.StartsWith("https://consent.google.com", StringComparison.OrdinalIgnoreCase))
                     {
-                        foreach (var gif in data)
+                        webView.EvaluateScriptAsync(@"document.getElementsByTagName('form')[0].submit();").Wait();
+                        System.Threading.Thread.Sleep(3000);
+                        webView.NavigateAndWait(searchUrl);
+                    }
+
+                    var pageSource = webView.GetPageSource();
+
+                    // Parse image results — same regex Playnite uses
+                    var formatted = System.Text.RegularExpressions.Regex.Replace(
+                        pageSource, @"\r\n?|\n", string.Empty);
+                    var matches = System.Text.RegularExpressions.Regex.Matches(
+                        formatted,
+                        @"\[""(https:\/\/encrypted-[^,]+?)"",\d+,\d+\],\[""(http.+?)"",(\d+),(\d+)\]");
+
+                    foreach (System.Text.RegularExpressions.Match match in matches)
+                    {
+                        try
                         {
-                            var title = gif["title"]?.ToString() ?? "Untitled";
-                            var originalUrl = gif["images"]?["original"]?["url"]?.ToString();
-                            var thumbUrl = gif["images"]?["fixed_width_small"]?["url"]?.ToString()
-                                ?? gif["images"]?["preview_gif"]?["url"]?.ToString()
-                                ?? originalUrl;
-                            var width = gif["images"]?["original"]?["width"]?.ToString();
-                            var height = gif["images"]?["original"]?["height"]?.ToString();
-                            var size = gif["images"]?["original"]?["size"]?.ToString();
+                            var data = Newtonsoft.Json.JsonConvert.DeserializeObject<
+                                System.Collections.Generic.List<System.Collections.Generic.List<object>>>(
+                                $"[{match.Value}]");
 
-                            if (!string.IsNullOrEmpty(originalUrl) && !string.IsNullOrEmpty(thumbUrl))
+                            var thumbUrl = data[0][0].ToString();
+                            var imageUrl = data[1][0].ToString();
+                            var height = data[1][1].ToString();
+                            var width = data[1][2].ToString();
+
+                            if (imageOptions.Any(o => o.Description?.Contains(imageUrl) == true))
+                                continue;
+
+                            var option = new ImageFileOption
                             {
-                                var sizeKb = 0L;
-                                long.TryParse(size ?? "0", out sizeKb);
-
-                                var option = new ImageFileOption
-                                {
-                                    Name = title,
-                                    Description = $"{width}x{height} | {sizeKb / 1024} KB",
-                                    Path = thumbUrl
-                                };
-                                imageOptions.Add(option);
-                                fullUrls[thumbUrl] = originalUrl;
-                            }
+                                Name = $"{width}x{height}",
+                                Description = imageUrl,
+                                Path = thumbUrl
+                            };
+                            imageOptions.Add(option);
+                            fullUrls[thumbUrl] = imageUrl;
                         }
+                        catch { }
                     }
                 }
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "GIPHY search failed");
+                Logger.Error(ex, "Web image search failed");
                 _api.Dialogs.ShowMessage($"Search failed: {ex.Message}", Constants.PluginName);
                 return;
             }
 
             if (imageOptions.Count == 0)
             {
-                _api.Dialogs.ShowMessage("No GIFs found.", Constants.PluginName);
+                _api.Dialogs.ShowMessage("No images found.", Constants.PluginName);
                 return;
             }
 
-            // Show image picker grid
-            var selected = _api.Dialogs.ChooseImageFile(
-                imageOptions,
-                $"Pick a GIF for {game.Name} ({imageOptions.Count} results)");
+            var mediaItems = imageOptions.Select(o => new Views.MediaItem
+            {
+                ThumbUrl = o.Path,
+                FullUrl = fullUrls.ContainsKey(o.Path) ? fullUrls[o.Path] : o.Description,
+                Size = o.Name
+            }).ToList();
 
-            if (selected == null) return;
+            var picker = new Views.MediaPickerWindow(mediaItems);
+            picker.Title = $"Pick media for {game.Name} ({mediaItems.Count} results)";
 
-            // Get the full-size URL for the selected thumbnail
-            var gifUrl = fullUrls.ContainsKey(selected.Path) ? fullUrls[selected.Path] : selected.Path;
+            if (picker.ShowDialog() == true && !string.IsNullOrEmpty(picker.SelectedUrl))
+                DownloadAndInsertMedia(game, picker.SelectedUrl, position);
+        }
 
-            DownloadAndInsertMedia(game, gifUrl, position);
+        private static string SanitizeFileName(string name)
+        {
+            foreach (var c in System.IO.Path.GetInvalidFileNameChars())
+                name = name.Replace(c, '_');
+            // Also strip query strings
+            var idx = name.IndexOf('?');
+            if (idx > 0) name = name.Substring(0, idx);
+            if (name.Length > 100) name = name.Substring(0, 100);
+            return name;
         }
 
         private static string ExtractFilenameFromTag(string tag)
@@ -774,38 +803,63 @@ namespace PlayGif
                     var game = menuArgs.Games.FirstOrDefault();
                     if (game == null) return;
 
-                    // Get stored description
                     var storedHtml = game.Description ?? "";
 
-                    // Get cached rich description (if any)
-                    string cachedHtml = null;
-                    if (_steamService != null)
-                        cachedHtml = _steamService.HasCachedDescription(game.Id)
-                            ? "(cached rich description available)" : null;
+                    // Check both stored and cached
+                    string cachedHtml = "";
+                    var hasCached = _steamService?.HasCachedDescription(game.Id) == true;
+                    if (hasCached)
+                    {
+                        var task = _steamService.GetRichDescriptionAsync(game);
+                        cachedHtml = task.GetAwaiter().GetResult() ?? "";
+                    }
 
-                    // Resolve Steam AppId
                     var appId = _steamService?.ResolveSteamAppId(game) ?? "N/A";
+                    var gogId = _steamService?.ResolveGogProductId(game) ?? "N/A";
 
-                    // Analyze stored description
-                    var sVideoCount = System.Text.RegularExpressions.Regex.Matches(storedHtml, "<video").Count;
-                    var sImgCount = System.Text.RegularExpressions.Regex.Matches(storedHtml, "<img").Count;
-                    var sGifCount = System.Text.RegularExpressions.Regex.Matches(storedHtml, @"\.(gif|webp|apng)").Count;
+                    string AnalyzeHtml(string html, string label)
+                    {
+                        if (string.IsNullOrEmpty(html)) return $"--- {label}: (empty) ---\n";
+                        var videos = System.Text.RegularExpressions.Regex.Matches(html, "<video").Count;
+                        var imgs = System.Text.RegularExpressions.Regex.Matches(html, "<img").Count;
+                        var iframes = System.Text.RegularExpressions.Regex.Matches(html, "<iframe").Count;
+                        var embeds = System.Text.RegularExpressions.Regex.Matches(html, "<embed").Count;
+                        var objects = System.Text.RegularExpressions.Regex.Matches(html, "<object").Count;
+                        var sources = System.Text.RegularExpressions.Regex.Matches(html, "<source").Count;
+
+                        return $"--- {label} ({html.Length} chars) ---\n" +
+                            $"<video>: {videos}  |  <img>: {imgs}  |  <source>: {sources}\n" +
+                            $"<iframe>: {iframes}  |  <embed>: {embeds}  |  <object>: {objects}\n" +
+                            $".webm: {html.Contains(".webm")}  |  .mp4: {html.Contains(".mp4")}\n" +
+                            $".gif: {html.Contains(".gif")}  |  .avif: {html.Contains(".avif")}\n" +
+                            $".webp: {html.Contains(".webp")}  |  .png: {html.Contains(".png")}\n" +
+                            $"playgif.local: {html.Contains(Common.Constants.VirtualHostName)}\n\n" +
+                            $"First 800 chars:\n" +
+                            html.Substring(0, System.Math.Min(800, html.Length)) + "\n";
+                    }
+
+                    var cacheDir = System.IO.Path.Combine(
+                        GetPluginUserDataPath(), Common.Constants.GamesCacheFolder, game.Id.ToString());
+                    var cacheFiles = System.IO.Directory.Exists(cacheDir)
+                        ? string.Join("\n  ", System.IO.Directory.GetFiles(cacheDir).Select(f =>
+                            $"{System.IO.Path.GetFileName(f)} ({new System.IO.FileInfo(f).Length / 1024} KB)"))
+                        : "(empty)";
 
                     var msg = $"=== {game.Name} ===\n\n" +
-                        $"Source: {(game.PluginId == Guid.Empty ? "Manual" : game.PluginId.ToString())}\n" +
-                        $"Steam AppId: {appId}\n" +
-                        $"PlayGif cache: {(cachedHtml ?? "none")}\n\n" +
-                        $"--- Stored Description ({storedHtml.Length} chars) ---\n" +
-                        $"Videos: {sVideoCount}  |  Images: {sImgCount}  |  GIF/WebP/APNG: {sGifCount}\n" +
-                        $"Has <video>: {storedHtml.Contains("<video")}\n" +
-                        $"Has .webm: {storedHtml.Contains(".webm")}\n" +
-                        $"Has .mp4: {storedHtml.Contains(".mp4")}\n" +
-                        $"Has .avif: {storedHtml.Contains(".avif")}\n" +
-                        $"Has .gif: {storedHtml.Contains(".gif")}\n\n" +
-                        $"--- First 500 chars ---\n" +
-                        storedHtml.Substring(0, System.Math.Min(500, storedHtml.Length));
+                        $"Playnite Game ID: {game.Id}\n" +
+                        $"Plugin: {(game.PluginId == Guid.Empty ? "Manual" : game.PluginId.ToString())}\n" +
+                        $"Steam AppId: {appId}  |  GOG ID: {gogId}\n" +
+                        $"PlayGif cache: {(hasCached ? "YES" : "none")}\n" +
+                        $"Cache folder: {cacheDir}\n" +
+                        $"Cached files:\n  {cacheFiles}\n\n" +
+                        AnalyzeHtml(storedHtml, "Stored Description") + "\n" +
+                        (hasCached ? AnalyzeHtml(cachedHtml, "Cached Rich Description") : "");
 
-                    _api.Dialogs.ShowMessage(msg, Constants.PluginName);
+                    // Save to temp file and open so user can copy
+                    var tempPath = System.IO.Path.Combine(
+                        System.IO.Path.GetTempPath(), $"PlayGif_Preview_{game.Name}.txt");
+                    System.IO.File.WriteAllText(tempPath, msg);
+                    System.Diagnostics.Process.Start(tempPath);
                 }
             });
 
@@ -874,30 +928,19 @@ namespace PlayGif
                 });
             }
 
-            // Search and add GIF
+            // Web image search
             foreach (var position in new[] { "top", "bottom" })
             {
                 var pos = position;
                 items.Add(new GameMenuItem
                 {
                     MenuSection = Constants.MenuSectionName + "|Add media to description",
-                    Description = $"Search GIF → {pos}",
+                    Description = $"Search web images → {pos}",
                     Action = (menuArgs) =>
                     {
                         var game = menuArgs.Games.FirstOrDefault();
                         if (game == null) return;
-
-                        if (string.IsNullOrWhiteSpace(Settings.GiphyApiKey))
-                        {
-                            _api.Dialogs.ShowMessage(
-                                "GIPHY API key not set.\n\n" +
-                                "Go to PlayGif settings and enter your free API key.\n" +
-                                "Get one at: developers.giphy.com",
-                                Constants.PluginName);
-                            return;
-                        }
-
-                        SearchAndAddGif(game, pos);
+                        SearchWebImages(game, pos);
                     }
                 });
             }
