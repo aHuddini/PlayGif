@@ -52,8 +52,14 @@
     // IntersectionObserver: only play videos near the visible area
     // Reduces GPU/decoder load which is the #1 cause of scroll stalls
     var _videoObserver = null;
+    var _posterOnly = false;
+
+    function setPosterOnly(enabled) {
+        _posterOnly = enabled;
+    }
 
     function setupVideoObserver() {
+        if (_posterOnly) return;
         if (_videoObserver) _videoObserver.disconnect();
 
         _videoObserver = new IntersectionObserver(function(entries) {
@@ -93,7 +99,7 @@
             };
         }
         // Immediately play the first video so the page isn't blank
-        if (videos.length > 0) {
+        if (videos.length > 0 && !_posterOnly) {
             videos[0].autoplay = true;
             videos[0].play().catch(function(){});
         }

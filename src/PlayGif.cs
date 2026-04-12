@@ -267,20 +267,95 @@ namespace PlayGif
 
                 Logger.Info($"Rendering: {game.Name} ({html.Length} chars)");
 
+                // Poster-only mode: replace <video> with <img poster> before cache rewrite
+                if (Settings.UseVideoPosterOnly)
+                {
+                    if (_renderer.IsInitialized)
+                        _ = _renderer.WebViewControl.CoreWebView2.ExecuteScriptAsync("setPosterOnly(true)");
+                    html = ReplaceVideosWithPosters(html);
+                    Logger.Info($"After poster replacement: {html.Length} chars, has video: {html.Contains("<video")}");
+                    Logger.Info($"Poster preview: {html.Substring(0, System.Math.Min(300, html.Length))}");
+                }
+
                 html = _cacheService.RewriteDescriptionHtml(html, game.Id);
+
                 _ = _renderer.SetDescriptionAsync(html);
                 UpdateThemeColors();
 
-                // Apply video scale setting
-                if (Settings.VideoScale != 100 && _renderer.IsInitialized)
+                // Apply video scale — per-game override or global default
+                var scale = _cacheService.GetGameVideoScale(game.Id) ?? Settings.VideoScale;
+                if (scale != 100 && _renderer.IsInitialized)
                 {
                     _ = _renderer.WebViewControl.CoreWebView2.ExecuteScriptAsync(
-                        $"setVideoScale({Settings.VideoScale})");
+                        $"setVideoScale({scale})");
                 }
             }
             catch (Exception ex)
             {
                 Logger.Error(ex, $"Error in TryInjectAndRender for: {game?.Name}");
+            }
+        }
+
+        private string ReplaceVideosWithPosters(string html)
+        {
+            try
+            {
+                var doc = new HtmlAgilityPack.HtmlDocument();
+                doc.LoadHtml(html);
+
+                var videos = doc.DocumentNode.SelectNodes("//video");
+                if (videos == null) return html;
+
+                foreach (var video in videos.ToList())
+                {
+                    var poster = video.GetAttributeValue("poster", "");
+
+                    // If no poster, try to use the MP4 source as a still frame
+                    if (string.IsNullOrEmpty(poster))
+                    {
+                        var source = video.SelectSingleNode(".//source[@type='video/mp4']")
+                            ?? video.SelectSingleNode(".//source");
+                        if (source != null)
+                        {
+                            var srcUrl = source.GetAttributeValue("src", "");
+                            if (!string.IsNullOrEmpty(srcUrl))
+                            {
+                                // Keep video but disable playback — shows first frame
+                                video.SetAttributeValue("preload", "metadata");
+                                video.Attributes.Remove("autoplay");
+                                video.Attributes.Remove("loop");
+                                // Remove all source elements except the MP4
+                                foreach (var s in video.SelectNodes(".//source")?.ToList()
+                                    ?? new System.Collections.Generic.List<HtmlAgilityPack.HtmlNode>())
+                                {
+                                    if (s != source) s.Remove();
+                                }
+                                continue;
+                            }
+                        }
+                        // No poster and no source — remove entirely
+                        video.ParentNode.RemoveChild(video);
+                        continue;
+                    }
+
+                    var w = video.GetAttributeValue("width", "");
+                    var h = video.GetAttributeValue("height", "");
+                    var cls = video.GetAttributeValue("class", "");
+
+                    var imgHtml = $"<img src=\"{poster}\" class=\"{cls}\"" +
+                        (!string.IsNullOrEmpty(w) ? $" width=\"{w}\"" : "") +
+                        (!string.IsNullOrEmpty(h) ? $" height=\"{h}\"" : "") +
+                        " style=\"max-width:100%;height:auto;display:block;\" />";
+
+                    var imgNode = HtmlAgilityPack.HtmlNode.CreateNode(imgHtml);
+                    video.ParentNode.ReplaceChild(imgNode, video);
+                }
+
+                return doc.DocumentNode.OuterHtml;
+            }
+            catch
+            {
+                return html;
             }
         }
 
@@ -386,6 +461,39 @@ namespace PlayGif
                     _api.Dialogs.ShowMessage(
                         "Cache cleared. Media will re-download as you browse.",
                         Constants.PluginName);
+                }
+            });
+
+            // Video scale submenu
+            foreach (var pct in new[] { 75, 50, 25 })
+            {
+                var scale = pct;
+                items.Add(new GameMenuItem
+                {
+                    MenuSection = Constants.MenuSectionName + "|Video scale",
+                    Description = $"{scale}%",
+                    Action = (menuArgs) =>
+                    {
+                        foreach (var game in menuArgs.Games)
+                            _cacheService?.SetGameVideoScale(game.Id, scale);
+                        if (_renderer?.IsInitialized == true)
+                            _ = _renderer.WebViewControl.CoreWebView2.ExecuteScriptAsync(
+                                $"setVideoScale({scale})");
+                    }
+                });
+            }
+
+            items.Add(new GameMenuItem
+            {
+                MenuSection = Constants.MenuSectionName + "|Video scale",
+                Description = "Reset to default",
+                Action = (menuArgs) =>
+                {
+                    foreach (var game in menuArgs.Games)
+                        _cacheService?.SetGameVideoScale(game.Id, null);
+                    if (_renderer?.IsInitialized == true)
+                        _ = _renderer.WebViewControl.CoreWebView2.ExecuteScriptAsync(
+                            $"setVideoScale({Settings.VideoScale})");
                 }
             });
 

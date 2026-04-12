@@ -118,6 +118,36 @@ namespace PlayGif.Services
             }
         }
 
+        public int? GetGameVideoScale(Guid gameId)
+        {
+            var path = Path.Combine(GetGameCacheDir(gameId), "_videoScale.txt");
+            if (File.Exists(path))
+            {
+                try
+                {
+                    if (int.TryParse(File.ReadAllText(path).Trim(), out var scale))
+                        return scale;
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        public void SetGameVideoScale(Guid gameId, int? scale)
+        {
+            var dir = GetGameCacheDir(gameId);
+            var path = Path.Combine(dir, "_videoScale.txt");
+            if (scale.HasValue)
+            {
+                Directory.CreateDirectory(dir);
+                File.WriteAllText(path, scale.Value.ToString());
+            }
+            else if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+
         public void ClearGameCache(Guid gameId)
         {
             var gameDir = GetGameCacheDir(gameId);

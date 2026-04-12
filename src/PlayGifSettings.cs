@@ -35,6 +35,13 @@ namespace PlayGif
             set { enableInFullscreen = value; OnPropertyChanged(nameof(EnableInFullscreen)); }
         }
 
+        private bool useVideoPosterOnly = false;
+        public bool UseVideoPosterOnly
+        {
+            get => useVideoPosterOnly;
+            set { useVideoPosterOnly = value; OnPropertyChanged(nameof(UseVideoPosterOnly)); }
+        }
+
         private int videoScale = 100;
         public int VideoScale
         {
