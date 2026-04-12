@@ -18,8 +18,8 @@
         color: var(--text-color);
         font-family: var(--font-family);
         font-size: var(--font-size);
-        overflow-y: auto;
-        overflow-x: hidden;
+        overflow: hidden;
+        overscroll-behavior: none;
     }
     #content {
         padding: 0 8px 0 0;
@@ -42,23 +42,40 @@
         text-decoration: underline;
     }
     ::-webkit-scrollbar {
-        width: 5px;
-    }
-    ::-webkit-scrollbar-track {
-        background: transparent;
-    }
-    ::-webkit-scrollbar-thumb {
-        background: rgba(255,255,255,0.15);
-        border-radius: 3px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-        background: rgba(255,255,255,0.35);
+        display: none;
     }
 </style>
 </head>
 <body>
 <div id="content"></div>
 <script>
+    // IntersectionObserver: only play videos near the visible area
+    // Reduces GPU/decoder load which is the #1 cause of scroll stalls
+    var _videoObserver = null;
+
+    function setupVideoObserver() {
+        if (_videoObserver) _videoObserver.disconnect();
+
+        _videoObserver = new IntersectionObserver(function(entries) {
+            entries.forEach(function(entry) {
+                var video = entry.target;
+                if (entry.isIntersecting) {
+                    video.play().catch(function(){});
+                } else {
+                    video.pause();
+                }
+            });
+        }, {
+            // Start loading slightly before visible (200px margin)
+            rootMargin: '200px 0px'
+        });
+
+        var videos = document.querySelectorAll('video');
+        for (var i = 0; i < videos.length; i++) {
+            _videoObserver.observe(videos[i]);
+        }
+    }
+
     function setContent(html) {
         var el = document.getElementById('content');
         el.innerHTML = html;
@@ -66,16 +83,44 @@
         for (var i = 0; i < videos.length; i++) {
             var v = videos[i];
             v.muted = true;
-            v.autoplay = true;
             v.playsInline = true;
+            v.preload = 'metadata';
             v.removeAttribute('loop');
+            v.removeAttribute('autoplay');
             v.onended = function() {
                 this.currentTime = 0;
                 this.play().catch(function(){});
             };
-            v.play().catch(function(){});
         }
-        window.scrollTo(0, 0);
+        // Immediately play the first video so the page isn't blank
+        if (videos.length > 0) {
+            videos[0].autoplay = true;
+            videos[0].play().catch(function(){});
+        }
+
+        // IntersectionObserver handles the rest based on visibility
+        setupVideoObserver();
+
+        // Report height multiple times as media loads and changes layout
+        setTimeout(reportHeight, 100);
+        setTimeout(reportHeight, 500);
+        setTimeout(reportHeight, 1500);
+        setTimeout(reportHeight, 3000);
+
+        // Also report when each video/image loads its dimensions
+        var media = el.querySelectorAll('video, img');
+        for (var j = 0; j < media.length; j++) {
+            media[j].addEventListener('loadedmetadata', reportHeight);
+            media[j].addEventListener('load', reportHeight);
+        }
+    }
+
+    function setVideoScale(pct) {
+        var maxW = Math.max(10, Math.min(100, pct)) + '%';
+        var videos = document.querySelectorAll('#content video');
+        for (var i = 0; i < videos.length; i++) {
+            videos[i].style.maxWidth = maxW;
+        }
         setTimeout(reportHeight, 100);
     }
 
@@ -96,14 +141,11 @@
     }
 
     function resumeAll() {
-        var videos = document.querySelectorAll('video');
-        for (var i = 0; i < videos.length; i++) {
-            videos[i].play().catch(function(){});
-        }
+        setupVideoObserver();
     }
 
     function reportHeight() {
-        var height = document.getElementById('content').scrollHeight;
+        var height = Math.ceil(document.getElementById('content').scrollHeight);
         window.chrome.webview.postMessage(JSON.stringify({ type: 'height', value: height }));
     }
 
@@ -111,14 +153,11 @@
         setTimeout(reportHeight, 200);
     }).observe(document.getElementById('content'), { childList: true, subtree: true });
 
-    // Forward scroll to WPF only at top/bottom boundary
+    // Forward ALL wheel events to WPF — no internal scrolling
     window.addEventListener('wheel', function(e) {
-        var atTop = window.scrollY <= 0;
-        var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 2;
-        if ((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom)) {
-            window.chrome.webview.postMessage('S' + e.deltaY);
-        }
-    }, { passive: true });
+        window.chrome.webview.postMessage('S' + e.deltaY);
+        e.preventDefault();
+    }, { passive: false });
 </script>
 </body>
 </html>

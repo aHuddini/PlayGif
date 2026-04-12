@@ -35,6 +35,13 @@ namespace PlayGif
             set { enableInFullscreen = value; OnPropertyChanged(nameof(EnableInFullscreen)); }
         }
 
+        private int videoScale = 100;
+        public int VideoScale
+        {
+            get => videoScale;
+            set { videoScale = value; OnPropertyChanged(nameof(VideoScale)); }
+        }
+
         private bool enableDebugMode = false;
         public bool EnableDebugMode
         {

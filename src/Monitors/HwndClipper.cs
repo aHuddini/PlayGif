@@ -24,7 +24,6 @@ namespace PlayGif.Monitors
         private readonly WebView2 _webView;
         private readonly ScrollViewer _scrollViewer;
         private Window _window;
-        private bool _clipDirty;
 
         public HwndClipper(WebView2 webView, ScrollViewer scrollViewer)
         {
@@ -37,8 +36,10 @@ namespace PlayGif.Monitors
             if (_scrollViewer == null) return;
             _scrollViewer.ScrollChanged += OnScrollChanged;
             _scrollViewer.SizeChanged += OnSizeChanged;
-            System.Windows.Media.CompositionTarget.Rendering += OnRender;
-            _clipDirty = true;
+            // Initial clip after a short delay to let layout settle
+            _webView.Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.Loaded,
+                new Action(() => UpdateClipRegion()));
         }
 
         public void Detach()
@@ -48,26 +49,19 @@ namespace PlayGif.Monitors
                 _scrollViewer.ScrollChanged -= OnScrollChanged;
                 _scrollViewer.SizeChanged -= OnSizeChanged;
             }
-            System.Windows.Media.CompositionTarget.Rendering -= OnRender;
         }
 
         private void OnScrollChanged(object sender, ScrollChangedEventArgs e)
         {
-            _clipDirty = true;
+            // Only update clip when the main page scrolls (not WebView2 internal scroll)
+            // VerticalChange != 0 means the ScrollViewer's offset changed
+            if (e.VerticalChange != 0 || e.ViewportHeightChange != 0)
+                UpdateClipRegion();
         }
 
         private void OnSizeChanged(object sender, SizeChangedEventArgs e)
         {
-            _clipDirty = true;
-        }
-
-        private void OnRender(object sender, EventArgs e)
-        {
-            if (_clipDirty)
-            {
-                _clipDirty = false;
-                UpdateClipRegion();
-            }
+            UpdateClipRegion();
         }
 
         public void UpdateClipRegion()

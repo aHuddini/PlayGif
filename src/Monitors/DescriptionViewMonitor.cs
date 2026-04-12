@@ -96,8 +96,8 @@ namespace PlayGif.Monitors
             Logger.Info($"Found description element. Parent type: {parent.GetType().Name}");
 
             // Desktop mode: parent is a Panel (StackPanel PART_ElemDescription)
-            // WebView2 fills viewport, scrolls internally — fast, no cross-thread comms
-            // HwndClipper prevents airspace overflow
+            // WebView2 is full content height (set by JS reportHeight)
+            // No internal scrolling — parent ScrollViewer scrolls, SetWindowRgn clips
             if (parent is Panel panel)
             {
                 htmlTextView.Visibility = Visibility.Collapsed;
@@ -106,17 +106,6 @@ namespace PlayGif.Monitors
                 _parentScrollViewer = FindAncestor<ScrollViewer>(panel);
 
                 webView.HorizontalAlignment = HorizontalAlignment.Stretch;
-
-                // Bind to viewport height — WebView2 scrolls its own content internally
-                if (_parentScrollViewer != null)
-                {
-                    webView.SetBinding(FrameworkElement.HeightProperty,
-                        new System.Windows.Data.Binding("ViewportHeight")
-                        {
-                            Source = _parentScrollViewer,
-                            Mode = System.Windows.Data.BindingMode.OneWay
-                        });
-                }
 
                 int index = panel.Children.IndexOf(htmlTextView);
                 if (index < 0) index = panel.Children.Count;

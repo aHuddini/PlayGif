@@ -42,7 +42,9 @@ namespace PlayGif.Services
             {
                 var userDataFolder = Path.Combine(_cacheBasePathProvider(), "WebView2Data");
                 Directory.CreateDirectory(userDataFolder);
-                _environment = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
+                var options = new CoreWebView2EnvironmentOptions(
+                    "--disable-threaded-scrolling");
+                _environment = await CoreWebView2Environment.CreateAsync(null, userDataFolder, options);
                 Logger.Info("WebView2 environment created.");
             }
             catch (Exception ex)
@@ -202,7 +204,8 @@ namespace PlayGif.Services
                 }
 
                 var msg = Newtonsoft.Json.Linq.JObject.Parse(raw);
-                if (msg["type"]?.ToString() == "height")
+                var type = msg["type"]?.ToString();
+                if (type == "height")
                 {
                     var height = msg["value"]?.ToObject<double>() ?? 0;
                     if (height > 0)

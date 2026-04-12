@@ -184,28 +184,46 @@ namespace PlayGif
                             return;
                         }
 
-                        // Fullscreen: set to content height so ScrollViewerEx scrolls it
-                        if (_api.ApplicationInfo.Mode == ApplicationMode.Fullscreen)
-                        {
-                            _renderer.HeightReported += (height) =>
-                            {
-                                Application.Current.Dispatcher.BeginInvoke(new Action(() =>
-                                {
-                                    _renderer.WebViewControl.Height = height;
-                                }));
-                            };
-                        }
-
-                        // Forward scroll at top/bottom boundary to parent
-                        _renderer.ScrollOverflow += (delta) =>
+                        // Full content height — no internal WebView2 scrolling
+                        // SetWindowRgn clips the HWND, parent ScrollViewer scrolls it
+                        _renderer.HeightReported += (height) =>
                         {
                             Application.Current.Dispatcher.BeginInvoke(new Action(() =>
                             {
-                                var sv = _viewMonitor.ParentScrollViewer;
-                                if (sv != null)
-                                    sv.ScrollToVerticalOffset(sv.VerticalOffset + delta);
+                                _renderer.WebViewControl.Height = height;
                             }));
                         };
+
+                        // Forward wheel events from WebView2 to parent ScrollViewer
+                        // Batch at render frame rate for smoothness
+                        double _pendingDelta = 0;
+                        bool _renderHooked = false;
+
+                        _renderer.ScrollOverflow += (delta) =>
+                        {
+                            _pendingDelta += delta;
+                            if (!_renderHooked)
+                            {
+                                _renderHooked = true;
+                                CompositionTarget.Rendering += OnRenderFrame;
+                            }
+                        };
+
+                        void OnRenderFrame(object s2, EventArgs e2)
+                        {
+                            if (_pendingDelta != 0)
+                            {
+                                var sv = _viewMonitor.ParentScrollViewer;
+                                if (sv != null)
+                                    sv.ScrollToVerticalOffset(sv.VerticalOffset + _pendingDelta);
+                                _pendingDelta = 0;
+                            }
+                            else
+                            {
+                                _renderHooked = false;
+                                CompositionTarget.Rendering -= OnRenderFrame;
+                            }
+                        }
 
 
                         Logger.Info("WebView2 fully initialized.");
@@ -252,6 +270,13 @@ namespace PlayGif
                 html = _cacheService.RewriteDescriptionHtml(html, game.Id);
                 _ = _renderer.SetDescriptionAsync(html);
                 UpdateThemeColors();
+
+                // Apply video scale setting
+                if (Settings.VideoScale != 100 && _renderer.IsInitialized)
+                {
+                    _ = _renderer.WebViewControl.CoreWebView2.ExecuteScriptAsync(
+                        $"setVideoScale({Settings.VideoScale})");
+                }
             }
             catch (Exception ex)
             {
