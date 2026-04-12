@@ -37,6 +37,9 @@ namespace PlayGif.Common
         public const string HtmlDescriptionPartName = "PART_HtmlDescription";
         public const string DescriptionPanelPartName = "PART_ElemDescription";
         public const string FullscreenScrollPartName = "PART_ScrollHtmlDescription";
+        // Some themes use non-standard names
+        public static readonly string[] AlternateDescriptionNames =
+            { "DescriptionText", "PART_Description" };
 
         #endregion
     }

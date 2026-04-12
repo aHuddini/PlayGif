@@ -60,6 +60,13 @@
 <body>
 <div id="content"></div>
 <script>
+    var _fullscreenMode = false;
+
+    function setFullscreenMode(enabled) {
+        _fullscreenMode = enabled;
+        document.body.style.overflowY = enabled ? 'hidden' : 'auto';
+    }
+
     function setContent(html) {
         var el = document.getElementById('content');
         el.innerHTML = html;
@@ -72,6 +79,10 @@
             videos[i].play().catch(function(){});
         }
         window.scrollTo(0, 0);
+        // In fullscreen mode, report height so WPF ScrollViewer can size us
+        if (_fullscreenMode) {
+            setTimeout(reportHeight, 100);
+        }
     }
 
     function setTheme(textColor, linkColor, fontSize, fontFamily, bgColor) {
@@ -97,7 +108,18 @@
         }
     }
 
-    // Forward scroll to WPF parent when at top/bottom edge
+    // Report content height to WPF (fullscreen mode only)
+    function reportHeight() {
+        var height = document.getElementById('content').scrollHeight;
+        window.chrome.webview.postMessage(JSON.stringify({ type: 'height', value: height }));
+    }
+
+    // Re-report when content changes (images/videos loading)
+    new MutationObserver(function() {
+        if (_fullscreenMode) setTimeout(reportHeight, 200);
+    }).observe(document.getElementById('content'), { childList: true, subtree: true });
+
+    // Forward scroll to WPF parent when at top/bottom edge (desktop mode)
     window.addEventListener('wheel', function(e) {
         var atTop = window.scrollY <= 0;
         var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 2;

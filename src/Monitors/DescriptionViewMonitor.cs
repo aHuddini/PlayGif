@@ -22,6 +22,11 @@ namespace PlayGif.Monitors
 
         public bool IsInjected => _hiddenHtmlTextView != null;
 
+        public void ResetSearchState()
+        {
+            _loggedMissing = false;
+        }
+
         public DescriptionViewMonitor(Func<WebView2> webViewProvider, Func<bool> isEnabled)
         {
             _webViewProvider = webViewProvider;
@@ -54,13 +59,27 @@ namespace PlayGif.Monitors
             if (webView.Parent != null) return;
 
             var htmlTextView = FindChildByName(root, Constants.HtmlDescriptionPartName);
+
+            // Try alternate names used by some themes (e.g., Solaris uses "DescriptionText")
             if (htmlTextView == null)
             {
-                // Only log once, not on every attempt
+                foreach (var altName in Constants.AlternateDescriptionNames)
+                {
+                    htmlTextView = FindChildByName(root, altName);
+                    if (htmlTextView != null)
+                    {
+                        Logger.Info($"Found description via alternate name: {altName}");
+                        break;
+                    }
+                }
+            }
+
+            if (htmlTextView == null)
+            {
                 if (!_loggedMissing)
                 {
                     _loggedMissing = true;
-                    Logger.Info("PART_HtmlDescription not found in visual tree. Dumping named elements...");
+                    Logger.Info("Description element not found in visual tree. Dumping named elements...");
                     DumpNamedElements(root, 0);
                 }
                 return;
@@ -82,7 +101,6 @@ namespace PlayGif.Monitors
                 _hiddenHtmlTextView = htmlTextView;
                 _injectionTarget = panel;
 
-                // Size WebView2 to fill the available viewport
                 _parentScrollViewer = FindAncestor<ScrollViewer>(panel);
                 if (_parentScrollViewer != null)
                 {
@@ -107,24 +125,25 @@ namespace PlayGif.Monitors
                 return;
             }
 
-            // Fullscreen mode: parent is a ScrollViewer (ScrollViewerEx PART_ScrollHtmlDescription)
-            // ScrollViewer has a single Content property — we need to wrap both in a StackPanel
-            if (parent is ScrollViewer scrollViewer)
+            // Fullscreen / other: find the nearest ScrollViewer ancestor
+            _parentScrollViewer = FindAncestor<ScrollViewer>(htmlTextView);
+            if (_parentScrollViewer != null)
             {
                 htmlTextView.Visibility = Visibility.Collapsed;
                 _hiddenHtmlTextView = htmlTextView;
-                _injectionTarget = scrollViewer;
+                _injectionTarget = _parentScrollViewer;
 
-                // Replace the ScrollViewer content with a wrapper containing both
-                var wrapper = new StackPanel();
-                scrollViewer.Content = wrapper;
-                wrapper.Children.Add(webView);
+                // Place WebView2 directly in the ScrollViewer — same as HtmlTextView was
+                // WebView2 height will be set to content height by JS reportHeight()
+                // ScrollViewerEx handles controller scrolling natively
+                webView.HorizontalAlignment = HorizontalAlignment.Stretch;
+                _parentScrollViewer.Content = webView;
 
-                Logger.Info("Injected into ScrollViewer (fullscreen mode).");
+                Logger.Info($"Injected into ScrollViewer ({_parentScrollViewer.GetType().Name}), size: {_parentScrollViewer.ActualWidth}x{_parentScrollViewer.ActualHeight}");
                 return;
             }
 
-            // Fallback: try to find a Panel ancestor higher up
+            // Last resort: find any Panel ancestor
             var ancestorPanel = FindAncestor<Panel>(htmlTextView);
             if (ancestorPanel != null)
             {
@@ -132,15 +151,7 @@ namespace PlayGif.Monitors
                 _hiddenHtmlTextView = htmlTextView;
                 _injectionTarget = ancestorPanel;
 
-                int index = ancestorPanel.Children.IndexOf(htmlTextView);
-                if (index >= 0)
-                {
-                    ancestorPanel.Children.Insert(index + 1, webView);
-                }
-                else
-                {
-                    ancestorPanel.Children.Add(webView);
-                }
+                ancestorPanel.Children.Add(webView);
 
                 Logger.Info($"Injected via ancestor Panel: {ancestorPanel.GetType().Name}");
                 return;
@@ -157,14 +168,9 @@ namespace PlayGif.Monitors
             {
                 parentPanel.Children.Remove(webView);
             }
-            else if (webView?.Parent is StackPanel wrapper && _injectionTarget is ScrollViewer sv)
+            else if (_injectionTarget is ScrollViewer sv)
             {
-                wrapper.Children.Remove(webView);
-                // Restore original content to ScrollViewer
-                if (_hiddenHtmlTextView != null)
-                {
-                    sv.Content = _hiddenHtmlTextView;
-                }
+                sv.Content = _hiddenHtmlTextView;
             }
 
             if (_hiddenHtmlTextView != null)

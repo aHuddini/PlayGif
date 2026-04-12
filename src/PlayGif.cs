@@ -86,7 +86,8 @@ namespace PlayGif
                 Logger.Info($"Mode: {(isFullscreen ? "Fullscreen" : "Desktop")}. Services prepared. Waiting for visual tree injection.");
 
                 // If a game was already selected, trigger injection + init
-                if (_lastSelectedGame != null)
+                // But in fullscreen, wait for OnFullscreenViewChanged(Details) instead
+                if (_lastSelectedGame != null && !isFullscreen)
                 {
                     Application.Current.Dispatcher.BeginInvoke(
                         DispatcherPriority.Loaded,
@@ -120,10 +121,35 @@ namespace PlayGif
                 return;
             }
 
-            // Delay to let the visual tree render the detail view
+            // In fullscreen, don't try injection on game select — wait for detail view
+            if (_api.ApplicationInfo.Mode == ApplicationMode.Fullscreen && !_viewMonitor.IsInjected)
+                return;
+
             Application.Current.Dispatcher.BeginInvoke(
                 DispatcherPriority.Loaded,
                 new Action(() => TryInjectAndRender(_lastSelectedGame)));
+        }
+
+        public override void OnFullscreenViewChanged(OnFullscreenViewChangedArgs args)
+        {
+            if (!Settings.EnableAnimatedDescriptions) return;
+            if (_renderer?.WebViewControl == null) return;
+
+            if (args.NewView == FullscreenView.Details && _lastSelectedGame != null)
+            {
+                Logger.Info($"Fullscreen detail view opened for: {_lastSelectedGame.Name}");
+                // Reset — the detail view template just expanded, tree has new elements
+                _injectionAttempts = 0;
+                _viewMonitor.ResetSearchState();
+                Application.Current.Dispatcher.BeginInvoke(
+                    DispatcherPriority.Loaded,
+                    new Action(() => TryInjectAndRender(_lastSelectedGame)));
+            }
+            else if (args.NewView == FullscreenView.List)
+            {
+                // Leaving detail view — pause videos
+                _renderer?.PauseAll();
+            }
         }
 
         private async void TryInjectAndRender(Game game)
@@ -153,9 +179,25 @@ namespace PlayGif
                         // Forward scroll overflow from WebView2 to parent WPF ScrollViewer
                         _renderer.ScrollOverflow += (delta) =>
                         {
-                            Application.Current.Dispatcher.Invoke(() =>
-                                _viewMonitor.ForwardScroll(delta));
+                            Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+                                _viewMonitor.ForwardScroll(delta)));
                         };
+
+                        // Fullscreen: WebView2 is full content height, ScrollViewerEx scrolls it
+                        // This lets the controller/dpad work natively through ScrollViewerEx
+                        if (_api.ApplicationInfo.Mode == ApplicationMode.Fullscreen)
+                        {
+                            _ = _renderer.WebViewControl.CoreWebView2.ExecuteScriptAsync(
+                                "setFullscreenMode(true)");
+                            _renderer.HeightReported += (height) =>
+                            {
+                                Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+                                {
+                                    Logger.Info($"Fullscreen content height: {height}px");
+                                    _renderer.WebViewControl.Height = height;
+                                }));
+                            };
+                        }
 
                         Logger.Info("WebView2 fully initialized.");
                     }

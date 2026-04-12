@@ -181,8 +181,8 @@ namespace PlayGif.Services
             }
         }
 
-        // Raised when WebView2 content is at scroll boundary and user keeps scrolling
         public event Action<double> ScrollOverflow;
+        public event Action<double> HeightReported;
 
         private void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
         {
@@ -198,6 +198,14 @@ namespace PlayGif.Services
                 {
                     var delta = msg["delta"]?.ToObject<double>() ?? 0;
                     ScrollOverflow?.Invoke(delta);
+                }
+                else if (type == "height")
+                {
+                    var height = msg["value"]?.ToObject<double>() ?? 0;
+                    if (height > 0)
+                    {
+                        HeightReported?.Invoke(height);
+                    }
                 }
             }
             catch { }
@@ -219,7 +227,6 @@ namespace PlayGif.Services
             }
 
             var escaped = JsonConvert.SerializeObject(html);
-            Logger.Info($"Executing setContent ({html.Length} chars)...");
             await _webView.CoreWebView2.ExecuteScriptAsync($"setContent({escaped})");
             _webView.Visibility = Visibility.Visible;
         }
