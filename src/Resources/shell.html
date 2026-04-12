@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+    :root {
+        --text-color: #ffffff;
+        --link-color: #0078d4;
+        --font-size: 14px;
+        --font-family: Segoe UI, sans-serif;
+        --bg-color: transparent;
+    }
+    html, body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg-color);
+        color: var(--text-color);
+        font-family: var(--font-family);
+        font-size: var(--font-size);
+        overflow: hidden;
+    }
+    #content {
+        padding: 0;
+    }
+    #content img {
+        max-width: 100%;
+        height: auto;
+        display: block;
+    }
+    #content video {
+        max-width: 100%;
+        height: auto;
+        display: block;
+    }
+    #content a {
+        color: var(--link-color);
+        text-decoration: none;
+    }
+    #content a:hover {
+        text-decoration: underline;
+    }
+    /* Hide scrollbar but allow content measurement */
+    ::-webkit-scrollbar {
+        display: none;
+    }
+</style>
+</head>
+<body>
+<div id="content"></div>
+<script>
+    function setContent(html) {
+        var el = document.getElementById('content');
+        el.innerHTML = html;
+        // Ensure all videos are muted, looping, autoplay
+        var videos = el.querySelectorAll('video');
+        for (var i = 0; i < videos.length; i++) {
+            videos[i].muted = true;
+            videos[i].loop = true;
+            videos[i].autoplay = true;
+            videos[i].playsInline = true;
+            videos[i].play().catch(function(){});
+        }
+        reportHeight();
+    }
+
+    function setTheme(textColor, linkColor, fontSize, fontFamily, bgColor) {
+        var root = document.documentElement.style;
+        root.setProperty('--text-color', textColor);
+        root.setProperty('--link-color', linkColor);
+        root.setProperty('--font-size', fontSize);
+        root.setProperty('--font-family', fontFamily);
+        root.setProperty('--bg-color', bgColor || 'transparent');
+    }
+
+    function pauseAll() {
+        var videos = document.querySelectorAll('video');
+        for (var i = 0; i < videos.length; i++) {
+            videos[i].pause();
+        }
+    }
+
+    function resumeAll() {
+        var videos = document.querySelectorAll('video');
+        for (var i = 0; i < videos.length; i++) {
+            videos[i].play().catch(function(){});
+        }
+    }
+
+    function reportHeight() {
+        var height = document.getElementById('content').scrollHeight;
+        window.chrome.webview.postMessage(JSON.stringify({ type: 'height', value: height }));
+    }
+
+    // Report height after images/videos load
+    new MutationObserver(function() {
+        setTimeout(reportHeight, 100);
+    }).observe(document.getElementById('content'), { childList: true, subtree: true });
+
+    window.addEventListener('load', reportHeight);
+    window.addEventListener('resize', reportHeight);
+</script>
+</body>
+</html>

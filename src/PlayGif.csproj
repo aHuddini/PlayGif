@@ -27,6 +27,10 @@
     </ItemGroup>
 
     <ItemGroup>
+        <EmbeddedResource Include="Resources\shell.html" />
+    </ItemGroup>
+
+    <ItemGroup>
         <None Include="..\extension.yaml">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
