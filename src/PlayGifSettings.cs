@@ -10,7 +10,7 @@ namespace PlayGif
 
         public event PropertyChangedEventHandler PropertyChanged;
 
-        // Serialization constructor (used by Playnite when loading settings from disk)
+        // Serialization constructor
         public PlayGifSettings() { }
 
         public PlayGifSettings(PlayGif plugin)
@@ -19,17 +19,39 @@ namespace PlayGif
             var saved = plugin.LoadPluginSettings<PlayGifSettings>();
             if (saved != null)
             {
-                // Copy saved values to this instance
-                EnableGifs = saved.EnableGifs;
+                EnableAnimatedDescriptions = saved.EnableAnimatedDescriptions;
+                AutoCacheMedia = saved.AutoCacheMedia;
+                MaxCachePerGameMB = saved.MaxCachePerGameMB;
+                EnableDebugMode = saved.EnableDebugMode;
             }
         }
 
-        // Settings properties
-        private bool enableGifs = true;
-        public bool EnableGifs
+        private bool enableAnimatedDescriptions = true;
+        public bool EnableAnimatedDescriptions
         {
-            get => enableGifs;
-            set { enableGifs = value; OnPropertyChanged(nameof(EnableGifs)); }
+            get => enableAnimatedDescriptions;
+            set { enableAnimatedDescriptions = value; OnPropertyChanged(nameof(EnableAnimatedDescriptions)); }
+        }
+
+        private bool autoCacheMedia = true;
+        public bool AutoCacheMedia
+        {
+            get => autoCacheMedia;
+            set { autoCacheMedia = value; OnPropertyChanged(nameof(AutoCacheMedia)); }
+        }
+
+        private int maxCachePerGameMB = Common.Constants.DefaultMaxCachePerGameMB;
+        public int MaxCachePerGameMB
+        {
+            get => maxCachePerGameMB;
+            set { maxCachePerGameMB = value; OnPropertyChanged(nameof(MaxCachePerGameMB)); }
+        }
+
+        private bool enableDebugMode = false;
+        public bool EnableDebugMode
+        {
+            get => enableDebugMode;
+            set { enableDebugMode = value; OnPropertyChanged(nameof(EnableDebugMode)); }
         }
 
         protected void OnPropertyChanged(string name = null)

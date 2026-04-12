@@ -4,8 +4,26 @@
     <StackPanel Margin="20">
         <TextBlock Text="PlayGif Settings" FontSize="18" FontWeight="Bold" Margin="0,0,0,15"/>
 
-        <CheckBox Content="Enable GIF display"
-                  IsChecked="{Binding Settings.EnableGifs}"
+        <CheckBox Content="Enable animated descriptions"
+                  IsChecked="{Binding Settings.EnableAnimatedDescriptions}"
+                  Margin="0,5,0,5"/>
+
+        <CheckBox Content="Auto-cache media for offline use"
+                  IsChecked="{Binding Settings.AutoCacheMedia}"
+                  Margin="0,5,0,5"
+                  IsEnabled="{Binding Settings.EnableAnimatedDescriptions}"/>
+
+        <StackPanel Orientation="Horizontal" Margin="0,10,0,5">
+            <TextBlock Text="Max cache per game (MB): " VerticalAlignment="Center"/>
+            <TextBox Text="{Binding Settings.MaxCachePerGameMB, UpdateSourceTrigger=PropertyChanged}"
+                     Width="60" VerticalAlignment="Center"
+                     IsEnabled="{Binding Settings.AutoCacheMedia}"/>
+        </StackPanel>
+
+        <Separator Margin="0,15,0,15"/>
+
+        <CheckBox Content="Enable debug mode (WebView2 DevTools)"
+                  IsChecked="{Binding Settings.EnableDebugMode}"
                   Margin="0,5,0,5"/>
     </StackPanel>
 </UserControl>
