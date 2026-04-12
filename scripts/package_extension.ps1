@@ -78,23 +78,37 @@ Write-Host "  Copied: PlayGif.dll" -ForegroundColor Gray
 # Copy dependencies from build output (exclude SDK and system DLLs)
 $excludedDlls = @(
     "Playnite.SDK.dll",
-    "System.*.dll",
-    "Microsoft.*.dll",
     "PlayGif.dll"
 )
+$systemPrefixes = @("System.", "Microsoft.CSharp.", "Microsoft.VisualBasic.")
 $buildOutput = Join-Path $projectRoot "src\bin\$Configuration\net4.6.2"
 foreach ($dll in (Get-ChildItem "$buildOutput\*.dll")) {
     $excluded = $false
     foreach ($pattern in $excludedDlls) {
-        if ($dll.Name -like $pattern) {
+        if ($dll.Name -eq $pattern) {
             $excluded = $true
             break
+        }
+    }
+    if (-not $excluded) {
+        foreach ($prefix in $systemPrefixes) {
+            if ($dll.Name.StartsWith($prefix)) {
+                $excluded = $true
+                break
+            }
         }
     }
     if (-not $excluded) {
         Copy-Item $dll.FullName -Destination $packageDir -Force
         Write-Host "  Copied: $($dll.Name)" -ForegroundColor Gray
     }
+}
+
+# Copy runtimes directory (WebView2 native loaders)
+$runtimesDir = Join-Path $buildOutput "runtimes"
+if (Test-Path $runtimesDir) {
+    Copy-Item $runtimesDir -Destination $packageDir -Recurse -Force
+    Write-Host "  Copied: runtimes/ (WebView2 native DLLs)" -ForegroundColor Gray
 }
 
 # Create .pext file (ZIP with .pext extension)
