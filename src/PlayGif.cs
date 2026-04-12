@@ -150,12 +150,12 @@ namespace PlayGif
                             return;
                         }
 
-                        // In fullscreen, enable scrolling inside WebView2
-                        if (_api.ApplicationInfo.Mode == ApplicationMode.Fullscreen)
+                        // Forward scroll overflow from WebView2 to parent WPF ScrollViewer
+                        _renderer.ScrollOverflow += (delta) =>
                         {
-                            _ = _renderer.WebViewControl.CoreWebView2.ExecuteScriptAsync(
-                                "document.body.style.overflow = 'auto'");
-                        }
+                            Application.Current.Dispatcher.Invoke(() =>
+                                _viewMonitor.ForwardScroll(delta));
+                        };
 
                         Logger.Info("WebView2 fully initialized.");
                     }

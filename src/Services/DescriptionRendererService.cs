@@ -7,7 +7,6 @@ using System.Windows.Media;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using Playnite.SDK;
 using PlayGif.Common;
 
@@ -182,29 +181,26 @@ namespace PlayGif.Services
             }
         }
 
+        // Raised when WebView2 content is at scroll boundary and user keeps scrolling
+        public event Action<double> ScrollOverflow;
+
         private void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
         {
             try
             {
-                // WebView2 returns the message as a JSON-encoded string,
-                // so we need to unwrap it first
                 var raw = e.TryGetWebMessageAsString();
                 if (string.IsNullOrEmpty(raw)) return;
 
-                var msg = JObject.Parse(raw);
-                var type = msg["type"]?.Value<string>();
-                var value = msg["value"]?.Value<double>() ?? 0;
+                var msg = Newtonsoft.Json.Linq.JObject.Parse(raw);
+                var type = msg["type"]?.ToString();
 
-                if (type == "height" && value > 0)
+                if (type == "scroll")
                 {
-                    Logger.Info($"Height reported: {value}px");
-                    _webView.Height = value;
+                    var delta = msg["delta"]?.ToObject<double>() ?? 0;
+                    ScrollOverflow?.Invoke(delta);
                 }
             }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, "Error processing web message");
-            }
+            catch { }
         }
 
         public async Task SetDescriptionAsync(string html)
@@ -224,10 +220,8 @@ namespace PlayGif.Services
 
             var escaped = JsonConvert.SerializeObject(html);
             Logger.Info($"Executing setContent ({html.Length} chars)...");
-            var result = await _webView.CoreWebView2.ExecuteScriptAsync($"setContent({escaped})");
-            Logger.Info($"setContent result: {result}");
+            await _webView.CoreWebView2.ExecuteScriptAsync($"setContent({escaped})");
             _webView.Visibility = Visibility.Visible;
-            _webView.MinHeight = 200;
         }
 
         public void UpdateTheme(Color textColor, Color linkColor, double fontSize, string fontFamily)

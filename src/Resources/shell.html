@@ -18,10 +18,11 @@
         color: var(--text-color);
         font-family: var(--font-family);
         font-size: var(--font-size);
-        overflow: hidden;
+        overflow-y: auto;
+        overflow-x: hidden;
     }
     #content {
-        padding: 0;
+        padding: 0 8px 0 0;
     }
     #content img {
         max-width: 100%;
@@ -40,9 +41,19 @@
     #content a:hover {
         text-decoration: underline;
     }
-    /* Hide scrollbar but allow content measurement */
+    /* Minimal scrollbar — nearly invisible until hovered */
     ::-webkit-scrollbar {
-        display: none;
+        width: 5px;
+    }
+    ::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+        background: rgba(255,255,255,0.15);
+        border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+        background: rgba(255,255,255,0.35);
     }
 </style>
 </head>
@@ -52,7 +63,6 @@
     function setContent(html) {
         var el = document.getElementById('content');
         el.innerHTML = html;
-        // Ensure all videos are muted, looping, autoplay
         var videos = el.querySelectorAll('video');
         for (var i = 0; i < videos.length; i++) {
             videos[i].muted = true;
@@ -61,7 +71,7 @@
             videos[i].playsInline = true;
             videos[i].play().catch(function(){});
         }
-        reportHeight();
+        window.scrollTo(0, 0);
     }
 
     function setTheme(textColor, linkColor, fontSize, fontFamily, bgColor) {
@@ -87,18 +97,18 @@
         }
     }
 
-    function reportHeight() {
-        var height = document.getElementById('content').scrollHeight;
-        window.chrome.webview.postMessage(JSON.stringify({ type: 'height', value: height }));
-    }
+    // Forward scroll to WPF parent when at top/bottom edge
+    window.addEventListener('wheel', function(e) {
+        var atTop = window.scrollY <= 0;
+        var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 2;
 
-    // Report height after images/videos load
-    new MutationObserver(function() {
-        setTimeout(reportHeight, 100);
-    }).observe(document.getElementById('content'), { childList: true, subtree: true });
-
-    window.addEventListener('load', reportHeight);
-    window.addEventListener('resize', reportHeight);
+        if ((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom)) {
+            window.chrome.webview.postMessage(JSON.stringify({
+                type: 'scroll',
+                delta: e.deltaY
+            }));
+        }
+    }, { passive: true });
 </script>
 </body>
 </html>

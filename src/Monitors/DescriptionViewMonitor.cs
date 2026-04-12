@@ -18,6 +18,7 @@ namespace PlayGif.Monitors
         private bool _loggedMissing;
         private FrameworkElement _hiddenHtmlTextView;
         private object _injectionTarget;
+        private ScrollViewer _parentScrollViewer;
 
         public bool IsInjected => _hiddenHtmlTextView != null;
 
@@ -80,6 +81,23 @@ namespace PlayGif.Monitors
                 htmlTextView.Visibility = Visibility.Collapsed;
                 _hiddenHtmlTextView = htmlTextView;
                 _injectionTarget = panel;
+
+                // Size WebView2 to fill the available viewport
+                _parentScrollViewer = FindAncestor<ScrollViewer>(panel);
+                if (_parentScrollViewer != null)
+                {
+                    webView.SetBinding(FrameworkElement.HeightProperty,
+                        new System.Windows.Data.Binding("ViewportHeight")
+                        {
+                            Source = _parentScrollViewer,
+                            Mode = System.Windows.Data.BindingMode.OneWay
+                        });
+                    Logger.Info($"Bound height to viewport: {_parentScrollViewer.ViewportHeight}px");
+                }
+                else
+                {
+                    webView.Height = 600;
+                }
 
                 int index = panel.Children.IndexOf(htmlTextView);
                 if (index < 0) index = panel.Children.Count;
@@ -156,6 +174,13 @@ namespace PlayGif.Monitors
             }
 
             _injectionTarget = null;
+        }
+
+        public void ForwardScroll(double delta)
+        {
+            if (_parentScrollViewer == null) return;
+            _parentScrollViewer.ScrollToVerticalOffset(
+                _parentScrollViewer.VerticalOffset + delta);
         }
 
         private static T FindAncestor<T>(DependencyObject element) where T : DependencyObject
