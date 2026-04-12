@@ -1,0 +1,32 @@
+# Build output
+bin/
+obj/
+src/bin/
+src/obj/
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+*.cache
+
+# NuGet
+packages/
+*.nupkg
+
+# Package output
+pext/*.pext
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Temp
+*.tmp
+*.bak
+*.swp
+
+# Superpowers brainstorm sessions
+.superpowers/
