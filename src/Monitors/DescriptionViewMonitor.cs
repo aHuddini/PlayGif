@@ -19,8 +19,10 @@ namespace PlayGif.Monitors
         private FrameworkElement _hiddenHtmlTextView;
         private object _injectionTarget;
         private ScrollViewer _parentScrollViewer;
+        private HwndClipper _clipper;
 
         public bool IsInjected => _hiddenHtmlTextView != null;
+        public ScrollViewer ParentScrollViewer => _parentScrollViewer;
 
         public void ResetSearchState()
         {
@@ -60,7 +62,6 @@ namespace PlayGif.Monitors
 
             var htmlTextView = FindChildByName(root, Constants.HtmlDescriptionPartName);
 
-            // Try alternate names used by some themes (e.g., Solaris uses "DescriptionText")
             if (htmlTextView == null)
             {
                 foreach (var altName in Constants.AlternateDescriptionNames)
@@ -88,20 +89,25 @@ namespace PlayGif.Monitors
             var parent = VisualTreeHelper.GetParent(htmlTextView);
             if (parent == null)
             {
-                Logger.Info("PART_HtmlDescription has no visual parent.");
+                Logger.Info("Description element has no visual parent.");
                 return;
             }
 
-            Logger.Info($"Found PART_HtmlDescription. Parent type: {parent.GetType().Name}");
+            Logger.Info($"Found description element. Parent type: {parent.GetType().Name}");
 
             // Desktop mode: parent is a Panel (StackPanel PART_ElemDescription)
+            // WebView2 fills viewport, scrolls internally — fast, no cross-thread comms
+            // HwndClipper prevents airspace overflow
             if (parent is Panel panel)
             {
                 htmlTextView.Visibility = Visibility.Collapsed;
                 _hiddenHtmlTextView = htmlTextView;
                 _injectionTarget = panel;
-
                 _parentScrollViewer = FindAncestor<ScrollViewer>(panel);
+
+                webView.HorizontalAlignment = HorizontalAlignment.Stretch;
+
+                // Bind to viewport height — WebView2 scrolls its own content internally
                 if (_parentScrollViewer != null)
                 {
                     webView.SetBinding(FrameworkElement.HeightProperty,
@@ -110,18 +116,20 @@ namespace PlayGif.Monitors
                             Source = _parentScrollViewer,
                             Mode = System.Windows.Data.BindingMode.OneWay
                         });
-                    Logger.Info($"Bound height to viewport: {_parentScrollViewer.ViewportHeight}px");
-                }
-                else
-                {
-                    webView.Height = 600;
                 }
 
                 int index = panel.Children.IndexOf(htmlTextView);
                 if (index < 0) index = panel.Children.Count;
                 panel.Children.Insert(index + 1, webView);
 
-                Logger.Info("Injected into Panel (desktop mode).");
+                // Clip the HWND to prevent airspace overflow
+                if (_parentScrollViewer != null)
+                {
+                    _clipper = new HwndClipper(webView, _parentScrollViewer);
+                    _clipper.Attach();
+                }
+
+                Logger.Info("Injected into Panel (desktop mode) with HWND clipping.");
                 return;
             }
 
@@ -133,26 +141,24 @@ namespace PlayGif.Monitors
                 _hiddenHtmlTextView = htmlTextView;
                 _injectionTarget = _parentScrollViewer;
 
-                // Place WebView2 directly in the ScrollViewer — same as HtmlTextView was
-                // WebView2 height will be set to content height by JS reportHeight()
-                // ScrollViewerEx handles controller scrolling natively
                 webView.HorizontalAlignment = HorizontalAlignment.Stretch;
                 _parentScrollViewer.Content = webView;
 
-                Logger.Info($"Injected into ScrollViewer ({_parentScrollViewer.GetType().Name}), size: {_parentScrollViewer.ActualWidth}x{_parentScrollViewer.ActualHeight}");
+                _clipper = new HwndClipper(webView, _parentScrollViewer);
+                _clipper.Attach();
+
+                Logger.Info($"Injected into ScrollViewer ({_parentScrollViewer.GetType().Name}) with HWND clipping.");
                 return;
             }
 
-            // Last resort: find any Panel ancestor
+            // Last resort
             var ancestorPanel = FindAncestor<Panel>(htmlTextView);
             if (ancestorPanel != null)
             {
                 htmlTextView.Visibility = Visibility.Collapsed;
                 _hiddenHtmlTextView = htmlTextView;
                 _injectionTarget = ancestorPanel;
-
                 ancestorPanel.Children.Add(webView);
-
                 Logger.Info($"Injected via ancestor Panel: {ancestorPanel.GetType().Name}");
                 return;
             }
@@ -162,6 +168,9 @@ namespace PlayGif.Monitors
 
         public void Restore()
         {
+            _clipper?.Detach();
+            _clipper = null;
+
             var webView = _webViewProvider();
 
             if (webView?.Parent is Panel parentPanel)
@@ -180,13 +189,7 @@ namespace PlayGif.Monitors
             }
 
             _injectionTarget = null;
-        }
-
-        public void ForwardScroll(double delta)
-        {
-            if (_parentScrollViewer == null) return;
-            _parentScrollViewer.ScrollToVerticalOffset(
-                _parentScrollViewer.VerticalOffset + delta);
+            _parentScrollViewer = null;
         }
 
         private static T FindAncestor<T>(DependencyObject element) where T : DependencyObject
@@ -203,14 +206,12 @@ namespace PlayGif.Monitors
         private static FrameworkElement FindChildByName(DependencyObject parent, string name)
         {
             if (parent == null) return null;
-
             int count = VisualTreeHelper.GetChildrenCount(parent);
             for (int i = 0; i < count; i++)
             {
                 var child = VisualTreeHelper.GetChild(parent, i);
                 if (child is FrameworkElement fe && fe.Name == name)
                     return fe;
-
                 var found = FindChildByName(child, name);
                 if (found != null)
                     return found;
@@ -218,18 +219,15 @@ namespace PlayGif.Monitors
             return null;
         }
 
-        // Dump named elements to help diagnose fullscreen visual tree
         private static void DumpNamedElements(DependencyObject parent, int depth)
         {
             if (parent == null || depth > 15) return;
-
             int count = VisualTreeHelper.GetChildrenCount(parent);
             for (int i = 0; i < count; i++)
             {
                 var child = VisualTreeHelper.GetChild(parent, i);
                 if (child is FrameworkElement fe && !string.IsNullOrEmpty(fe.Name))
                 {
-                    // Log elements with names containing "description", "html", "detail", or "PART_"
                     var nameLower = fe.Name.ToLowerInvariant();
                     if (nameLower.Contains("desc") || nameLower.Contains("html") ||
                         nameLower.Contains("detail") || nameLower.Contains("part_") ||

@@ -181,8 +181,8 @@ namespace PlayGif.Services
             }
         }
 
-        public event Action<double> ScrollOverflow;
         public event Action<double> HeightReported;
+        public event Action<double> ScrollOverflow;
 
         private void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
         {
@@ -191,21 +191,22 @@ namespace PlayGif.Services
                 var raw = e.TryGetWebMessageAsString();
                 if (string.IsNullOrEmpty(raw)) return;
 
-                var msg = Newtonsoft.Json.Linq.JObject.Parse(raw);
-                var type = msg["type"]?.ToString();
-
-                if (type == "scroll")
+                // Fast path for scroll overflow (S{delta})
+                if (raw[0] == 'S')
                 {
-                    var delta = msg["delta"]?.ToObject<double>() ?? 0;
-                    ScrollOverflow?.Invoke(delta);
+                    if (double.TryParse(raw.Substring(1),
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var delta))
+                        ScrollOverflow?.Invoke(delta);
+                    return;
                 }
-                else if (type == "height")
+
+                var msg = Newtonsoft.Json.Linq.JObject.Parse(raw);
+                if (msg["type"]?.ToString() == "height")
                 {
                     var height = msg["value"]?.ToObject<double>() ?? 0;
                     if (height > 0)
-                    {
                         HeightReported?.Invoke(height);
-                    }
                 }
             }
             catch { }

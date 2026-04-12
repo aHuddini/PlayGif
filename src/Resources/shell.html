@@ -41,7 +41,6 @@
     #content a:hover {
         text-decoration: underline;
     }
-    /* Minimal scrollbar — nearly invisible until hovered */
     ::-webkit-scrollbar {
         width: 5px;
     }
@@ -60,29 +59,24 @@
 <body>
 <div id="content"></div>
 <script>
-    var _fullscreenMode = false;
-
-    function setFullscreenMode(enabled) {
-        _fullscreenMode = enabled;
-        document.body.style.overflowY = enabled ? 'hidden' : 'auto';
-    }
-
     function setContent(html) {
         var el = document.getElementById('content');
         el.innerHTML = html;
         var videos = el.querySelectorAll('video');
         for (var i = 0; i < videos.length; i++) {
-            videos[i].muted = true;
-            videos[i].loop = true;
-            videos[i].autoplay = true;
-            videos[i].playsInline = true;
-            videos[i].play().catch(function(){});
+            var v = videos[i];
+            v.muted = true;
+            v.autoplay = true;
+            v.playsInline = true;
+            v.removeAttribute('loop');
+            v.onended = function() {
+                this.currentTime = 0;
+                this.play().catch(function(){});
+            };
+            v.play().catch(function(){});
         }
         window.scrollTo(0, 0);
-        // In fullscreen mode, report height so WPF ScrollViewer can size us
-        if (_fullscreenMode) {
-            setTimeout(reportHeight, 100);
-        }
+        setTimeout(reportHeight, 100);
     }
 
     function setTheme(textColor, linkColor, fontSize, fontFamily, bgColor) {
@@ -108,33 +102,21 @@
         }
     }
 
-    // Report content height to WPF (fullscreen mode only)
     function reportHeight() {
         var height = document.getElementById('content').scrollHeight;
         window.chrome.webview.postMessage(JSON.stringify({ type: 'height', value: height }));
     }
 
-    // Re-report when content changes (images/videos loading)
     new MutationObserver(function() {
-        if (_fullscreenMode) setTimeout(reportHeight, 200);
+        setTimeout(reportHeight, 200);
     }).observe(document.getElementById('content'), { childList: true, subtree: true });
 
-    // Forward scroll to WPF parent when at top/bottom edge (desktop mode)
-    // Throttled to prevent flooding postMessage which can stall the renderer
-    var _scrollThrottled = false;
+    // Forward scroll to WPF only at top/bottom boundary
     window.addEventListener('wheel', function(e) {
-        if (_fullscreenMode || _scrollThrottled) return;
-
         var atTop = window.scrollY <= 0;
         var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 2;
-
         if ((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom)) {
-            _scrollThrottled = true;
-            window.chrome.webview.postMessage(JSON.stringify({
-                type: 'scroll',
-                delta: e.deltaY
-            }));
-            setTimeout(function() { _scrollThrottled = false; }, 250);
+            window.chrome.webview.postMessage('S' + e.deltaY);
         }
     }, { passive: true });
 </script>

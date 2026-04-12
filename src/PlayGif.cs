@@ -184,28 +184,29 @@ namespace PlayGif
                             return;
                         }
 
-                        // Forward scroll overflow from WebView2 to parent WPF ScrollViewer
-                        _renderer.ScrollOverflow += (delta) =>
-                        {
-                            Application.Current.Dispatcher.BeginInvoke(new Action(() =>
-                                _viewMonitor.ForwardScroll(delta)));
-                        };
-
-                        // Fullscreen: WebView2 is full content height, ScrollViewerEx scrolls it
-                        // This lets the controller/dpad work natively through ScrollViewerEx
+                        // Fullscreen: set to content height so ScrollViewerEx scrolls it
                         if (_api.ApplicationInfo.Mode == ApplicationMode.Fullscreen)
                         {
-                            _ = _renderer.WebViewControl.CoreWebView2.ExecuteScriptAsync(
-                                "setFullscreenMode(true)");
                             _renderer.HeightReported += (height) =>
                             {
                                 Application.Current.Dispatcher.BeginInvoke(new Action(() =>
                                 {
-                                    Logger.Info($"Fullscreen content height: {height}px");
                                     _renderer.WebViewControl.Height = height;
                                 }));
                             };
                         }
+
+                        // Forward scroll at top/bottom boundary to parent
+                        _renderer.ScrollOverflow += (delta) =>
+                        {
+                            Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+                            {
+                                var sv = _viewMonitor.ParentScrollViewer;
+                                if (sv != null)
+                                    sv.ScrollToVerticalOffset(sv.VerticalOffset + delta);
+                            }));
+                        };
+
 
                         Logger.Info("WebView2 fully initialized.");
                     }
