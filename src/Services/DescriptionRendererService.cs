@@ -7,6 +7,7 @@ using System.Windows.Media;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Playnite.SDK;
 using PlayGif.Common;
 
@@ -21,7 +22,10 @@ namespace PlayGif.Services
         private WebView2 _webView;
         private CoreWebView2Environment _environment;
         private bool _isInitialized;
+        private bool _isInitializing;
+        private bool _shellReady;
         private string _pendingContent;
+        private TaskCompletionSource<bool> _initTcs;
 
         public WebView2 WebViewControl => _webView;
         public bool IsInitialized => _isInitialized;
@@ -32,27 +36,67 @@ namespace PlayGif.Services
             _cacheBasePathProvider = cacheBasePathProvider;
         }
 
-        public async Task InitializeAsync()
+        // Create the environment early (can be done before visual tree attachment)
+        public async Task PrepareEnvironmentAsync()
         {
             try
             {
-                var userDataFolder = Path.Combine(
-                    _cacheBasePathProvider(), "WebView2Data");
-                _environment = await CoreWebView2Environment.CreateAsync(
-                    null, userDataFolder);
-
-                _webView = new WebView2();
-                _webView.DefaultBackgroundColor = System.Drawing.Color.Transparent;
-                _webView.Visibility = Visibility.Collapsed;
-                _webView.Focusable = false;
-
-                _webView.CoreWebView2InitializationCompleted += OnCoreWebView2Ready;
-                await _webView.EnsureCoreWebView2Async(_environment);
+                var userDataFolder = Path.Combine(_cacheBasePathProvider(), "WebView2Data");
+                Directory.CreateDirectory(userDataFolder);
+                _environment = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
+                Logger.Info("WebView2 environment created.");
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "Failed to initialize WebView2. Falling back to default renderer.");
+                Logger.Error(ex, "Failed to create WebView2 environment.");
+            }
+        }
+
+        // Create the WebView2 control (call on UI thread)
+        public WebView2 CreateWebViewControl()
+        {
+            if (_webView != null) return _webView;
+
+            _webView = new WebView2();
+            _webView.DefaultBackgroundColor = System.Drawing.Color.Transparent;
+            _webView.Visibility = Visibility.Collapsed;
+            _webView.Focusable = false;
+
+            return _webView;
+        }
+
+        // Initialize after the control is in the visual tree
+        public async Task InitializeAsync()
+        {
+            if (_isInitialized || _isInitializing) return;
+            if (_environment == null)
+            {
+                Logger.Error("Cannot initialize — environment not prepared.");
+                return;
+            }
+            if (_webView == null)
+            {
+                Logger.Error("Cannot initialize — WebView2 control not created.");
+                return;
+            }
+
+            _isInitializing = true;
+            _initTcs = new TaskCompletionSource<bool>();
+
+            try
+            {
+                Logger.Info("Starting WebView2 core initialization...");
+                _webView.CoreWebView2InitializationCompleted += OnCoreWebView2Ready;
+                await _webView.EnsureCoreWebView2Async(_environment);
+
+                // Wait for OnCoreWebView2Ready to complete setup
+                await _initTcs.Task;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Failed to initialize WebView2.");
                 _isInitialized = false;
+                _isInitializing = false;
             }
         }
 
@@ -60,59 +104,76 @@ namespace PlayGif.Services
         {
             if (!e.IsSuccess)
             {
-                Logger.Error(e.InitializationException,
-                    "WebView2 CoreWebView2 initialization failed.");
+                Logger.Error(e.InitializationException, "WebView2 CoreWebView2 initialization failed.");
+                _initTcs?.TrySetResult(false);
                 return;
             }
 
             var core = _webView.CoreWebView2;
 
             // Lockdown
-            var coreSettings = core.Settings;
-            coreSettings.AreBrowserAcceleratorKeysEnabled = false;
-            coreSettings.IsStatusBarEnabled = false;
-            coreSettings.AreDefaultContextMenusEnabled = false;
-            coreSettings.IsZoomControlEnabled = false;
-            coreSettings.AreDevToolsEnabled = _settings.EnableDebugMode;
-            coreSettings.IsWebMessageEnabled = true;
+            var s = core.Settings;
+            s.AreBrowserAcceleratorKeysEnabled = false;
+            s.IsStatusBarEnabled = false;
+            s.AreDefaultContextMenusEnabled = false;
+            s.IsZoomControlEnabled = false;
+            s.AreDevToolsEnabled = _settings.EnableDebugMode;
+            s.IsWebMessageEnabled = true;
 
             // Map local cache folder to virtual host
             var cachePath = Path.Combine(_cacheBasePathProvider(), Constants.GamesCacheFolder);
             Directory.CreateDirectory(cachePath);
             core.SetVirtualHostNameToFolderMapping(
-                Constants.VirtualHostName,
-                cachePath,
-                CoreWebView2HostResourceAccessKind.Allow);
+                Constants.VirtualHostName, cachePath, CoreWebView2HostResourceAccessKind.Allow);
 
-            // Intercept external navigation — open in system browser
             core.NavigationStarting += OnNavigationStarting;
-
-            // Listen for height reports from JS
             core.WebMessageReceived += OnWebMessageReceived;
+            core.NavigationCompleted += OnShellNavigationCompleted;
 
-            // Load shell page from embedded resource
+            // Load shell page
             var shellHtml = LoadEmbeddedShellHtml();
+            Logger.Info($"Loading shell page ({shellHtml.Length} chars)...");
             core.NavigateToString(shellHtml);
 
             _isInitialized = true;
-            Logger.Info("WebView2 renderer initialized.");
+            _isInitializing = false;
+            Logger.Info("WebView2 core initialized. Waiting for shell page navigation...");
+        }
 
-            // If content was queued before init completed, render it now
-            if (_pendingContent != null)
+        private void OnShellNavigationCompleted(object sender, CoreWebView2NavigationCompletedEventArgs e)
+        {
+            _webView.CoreWebView2.NavigationCompleted -= OnShellNavigationCompleted;
+
+            if (e.IsSuccess)
             {
-                var content = _pendingContent;
-                _pendingContent = null;
-                _ = SetDescriptionAsync(content);
+                _shellReady = true;
+                Logger.Info("Shell page loaded. Ready to render content.");
+
+                _initTcs?.TrySetResult(true);
+
+                // Render queued content
+                if (_pendingContent != null)
+                {
+                    var content = _pendingContent;
+                    _pendingContent = null;
+                    _ = SetDescriptionAsync(content);
+                }
+            }
+            else
+            {
+                Logger.Error($"Shell page navigation failed: {e.WebErrorStatus}");
+                _initTcs?.TrySetResult(false);
             }
         }
 
         private void OnNavigationStarting(object sender, CoreWebView2NavigationStartingEventArgs e)
         {
-            // Allow initial about:blank and data: navigations
+            // Allow the initial shell page load
+            if (!_shellReady) return;
+
             if (e.Uri.StartsWith("about:") || e.Uri.StartsWith("data:"))
                 return;
 
-            // Block all other navigations — open links in system browser
             e.Cancel = true;
             if (e.Uri.StartsWith("http"))
             {
@@ -125,21 +186,32 @@ namespace PlayGif.Services
         {
             try
             {
-                var json = e.WebMessageAsJson;
-                var msg = JsonConvert.DeserializeAnonymousType(json,
-                    new { type = "", value = 0.0 });
-                if (msg?.type == "height" && msg.value > 0)
+                // WebView2 returns the message as a JSON-encoded string,
+                // so we need to unwrap it first
+                var raw = e.TryGetWebMessageAsString();
+                if (string.IsNullOrEmpty(raw)) return;
+
+                var msg = JObject.Parse(raw);
+                var type = msg["type"]?.Value<string>();
+                var value = msg["value"]?.Value<double>() ?? 0;
+
+                if (type == "height" && value > 0)
                 {
-                    _webView.Height = msg.value;
+                    Logger.Info($"Height reported: {value}px");
+                    _webView.Height = value;
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Error processing web message");
+            }
         }
 
         public async Task SetDescriptionAsync(string html)
         {
-            if (!_isInitialized)
+            if (!_isInitialized || !_shellReady)
             {
+                Logger.Info($"Queuing content (initialized={_isInitialized}, shellReady={_shellReady})");
                 _pendingContent = html;
                 return;
             }
@@ -151,34 +223,31 @@ namespace PlayGif.Services
             }
 
             var escaped = JsonConvert.SerializeObject(html);
-            await _webView.CoreWebView2.ExecuteScriptAsync(
-                $"setContent({escaped})");
+            Logger.Info($"Executing setContent ({html.Length} chars)...");
+            var result = await _webView.CoreWebView2.ExecuteScriptAsync($"setContent({escaped})");
+            Logger.Info($"setContent result: {result}");
             _webView.Visibility = Visibility.Visible;
+            _webView.MinHeight = 200;
         }
 
         public void UpdateTheme(Color textColor, Color linkColor, double fontSize, string fontFamily)
         {
             if (!_isInitialized) return;
-
             var textHex = $"#{textColor.R:X2}{textColor.G:X2}{textColor.B:X2}";
             var linkHex = $"#{linkColor.R:X2}{linkColor.G:X2}{linkColor.B:X2}";
-            var sizeStr = $"{fontSize}px";
-
             _ = _webView.CoreWebView2.ExecuteScriptAsync(
-                $"setTheme('{textHex}', '{linkHex}', '{sizeStr}', '{fontFamily}', 'transparent')");
+                $"setTheme('{textHex}', '{linkHex}', '{fontSize}px', '{fontFamily}', 'transparent')");
         }
 
         public void PauseAll()
         {
             if (!_isInitialized) return;
             _ = _webView.CoreWebView2.ExecuteScriptAsync("pauseAll()");
-            _webView.CoreWebView2.TrySuspendAsync();
         }
 
         public void ResumeAll()
         {
             if (!_isInitialized) return;
-            _webView.CoreWebView2.Resume();
             _ = _webView.CoreWebView2.ExecuteScriptAsync("resumeAll()");
         }
 

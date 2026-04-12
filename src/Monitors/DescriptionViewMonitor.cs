@@ -15,8 +15,9 @@ namespace PlayGif.Monitors
         private readonly Func<WebView2> _webViewProvider;
         private readonly Func<bool> _isEnabled;
         private bool _isHooked;
+        private bool _loggedMissing;
         private FrameworkElement _hiddenHtmlTextView;
-        private Panel _injectedParent;
+        private object _injectionTarget;
 
         public bool IsInjected => _hiddenHtmlTextView != null;
 
@@ -42,8 +43,6 @@ namespace PlayGif.Monitors
 
             var webView = _webViewProvider();
             if (webView == null) return;
-
-            // Already injected somewhere
             if (webView.Parent != null) return;
 
             TryInject(window, webView);
@@ -54,30 +53,100 @@ namespace PlayGif.Monitors
             if (webView.Parent != null) return;
 
             var htmlTextView = FindChildByName(root, Constants.HtmlDescriptionPartName);
-            if (htmlTextView == null) return;
+            if (htmlTextView == null)
+            {
+                // Only log once, not on every attempt
+                if (!_loggedMissing)
+                {
+                    _loggedMissing = true;
+                    Logger.Info("PART_HtmlDescription not found in visual tree. Dumping named elements...");
+                    DumpNamedElements(root, 0);
+                }
+                return;
+            }
 
-            var parent = VisualTreeHelper.GetParent(htmlTextView) as Panel;
-            if (parent == null) return;
+            var parent = VisualTreeHelper.GetParent(htmlTextView);
+            if (parent == null)
+            {
+                Logger.Info("PART_HtmlDescription has no visual parent.");
+                return;
+            }
 
-            // Hide the original HtmlTextView
-            htmlTextView.Visibility = Visibility.Collapsed;
-            _hiddenHtmlTextView = htmlTextView;
-            _injectedParent = parent;
+            Logger.Info($"Found PART_HtmlDescription. Parent type: {parent.GetType().Name}");
 
-            // Insert WebView2 at the same position
-            int index = parent.Children.IndexOf(htmlTextView);
-            if (index < 0) index = parent.Children.Count;
-            parent.Children.Insert(index + 1, webView);
+            // Desktop mode: parent is a Panel (StackPanel PART_ElemDescription)
+            if (parent is Panel panel)
+            {
+                htmlTextView.Visibility = Visibility.Collapsed;
+                _hiddenHtmlTextView = htmlTextView;
+                _injectionTarget = panel;
 
-            Logger.Info("Injected WebView2 renderer via visual tree fallback.");
+                int index = panel.Children.IndexOf(htmlTextView);
+                if (index < 0) index = panel.Children.Count;
+                panel.Children.Insert(index + 1, webView);
+
+                Logger.Info("Injected into Panel (desktop mode).");
+                return;
+            }
+
+            // Fullscreen mode: parent is a ScrollViewer (ScrollViewerEx PART_ScrollHtmlDescription)
+            // ScrollViewer has a single Content property — we need to wrap both in a StackPanel
+            if (parent is ScrollViewer scrollViewer)
+            {
+                htmlTextView.Visibility = Visibility.Collapsed;
+                _hiddenHtmlTextView = htmlTextView;
+                _injectionTarget = scrollViewer;
+
+                // Replace the ScrollViewer content with a wrapper containing both
+                var wrapper = new StackPanel();
+                scrollViewer.Content = wrapper;
+                wrapper.Children.Add(webView);
+
+                Logger.Info("Injected into ScrollViewer (fullscreen mode).");
+                return;
+            }
+
+            // Fallback: try to find a Panel ancestor higher up
+            var ancestorPanel = FindAncestor<Panel>(htmlTextView);
+            if (ancestorPanel != null)
+            {
+                htmlTextView.Visibility = Visibility.Collapsed;
+                _hiddenHtmlTextView = htmlTextView;
+                _injectionTarget = ancestorPanel;
+
+                int index = ancestorPanel.Children.IndexOf(htmlTextView);
+                if (index >= 0)
+                {
+                    ancestorPanel.Children.Insert(index + 1, webView);
+                }
+                else
+                {
+                    ancestorPanel.Children.Add(webView);
+                }
+
+                Logger.Info($"Injected via ancestor Panel: {ancestorPanel.GetType().Name}");
+                return;
+            }
+
+            Logger.Info($"Could not inject — unsupported parent type: {parent.GetType().Name}");
         }
 
         public void Restore()
         {
             var webView = _webViewProvider();
-            if (_injectedParent != null && webView != null)
+
+            if (webView?.Parent is Panel parentPanel)
             {
-                _injectedParent.Children.Remove(webView);
+                parentPanel.Children.Remove(webView);
+            }
+            else if (webView?.Parent is StackPanel wrapper && _injectionTarget is ScrollViewer sv)
+            {
+                wrapper.Children.Remove(webView);
+                // Restore original content to ScrollViewer
+                if (_hiddenHtmlTextView != null)
+                {
+                    sv.Content = _hiddenHtmlTextView;
+                }
             }
 
             if (_hiddenHtmlTextView != null)
@@ -86,38 +155,18 @@ namespace PlayGif.Monitors
                 _hiddenHtmlTextView = null;
             }
 
-            _injectedParent = null;
+            _injectionTarget = null;
         }
 
-        public string ReadCurrentDescription()
+        private static T FindAncestor<T>(DependencyObject element) where T : DependencyObject
         {
-            if (_hiddenHtmlTextView == null) return null;
-
-            // Read the HtmlText dependency property from HtmlTextView
-            // HtmlTextView is a Playnite type; we access via reflection
-            var prop = _hiddenHtmlTextView.GetType().GetProperty("HtmlText");
-            if (prop != null)
+            var parent = VisualTreeHelper.GetParent(element);
+            while (parent != null)
             {
-                return prop.GetValue(_hiddenHtmlTextView) as string;
+                if (parent is T match) return match;
+                parent = VisualTreeHelper.GetParent(parent);
             }
-
-            // Fallback: try the dependency property directly
-            var dp = FindDependencyProperty(_hiddenHtmlTextView.GetType(), "HtmlTextProperty");
-            if (dp != null)
-            {
-                return _hiddenHtmlTextView.GetValue(dp) as string;
-            }
-
             return null;
-        }
-
-        private static DependencyProperty FindDependencyProperty(Type type, string fieldName)
-        {
-            var field = type.GetField(fieldName,
-                System.Reflection.BindingFlags.Public |
-                System.Reflection.BindingFlags.Static |
-                System.Reflection.BindingFlags.FlattenHierarchy);
-            return field?.GetValue(null) as DependencyProperty;
         }
 
         private static FrameworkElement FindChildByName(DependencyObject parent, string name)
@@ -136,6 +185,30 @@ namespace PlayGif.Monitors
                     return found;
             }
             return null;
+        }
+
+        // Dump named elements to help diagnose fullscreen visual tree
+        private static void DumpNamedElements(DependencyObject parent, int depth)
+        {
+            if (parent == null || depth > 15) return;
+
+            int count = VisualTreeHelper.GetChildrenCount(parent);
+            for (int i = 0; i < count; i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is FrameworkElement fe && !string.IsNullOrEmpty(fe.Name))
+                {
+                    // Log elements with names containing "description", "html", "detail", or "PART_"
+                    var nameLower = fe.Name.ToLowerInvariant();
+                    if (nameLower.Contains("desc") || nameLower.Contains("html") ||
+                        nameLower.Contains("detail") || nameLower.Contains("part_") ||
+                        nameLower.Contains("content") || nameLower.Contains("scroll"))
+                    {
+                        Logger.Info($"  [Tree] {new string(' ', depth * 2)}{fe.GetType().Name} Name=\"{fe.Name}\"");
+                    }
+                }
+                DumpNamedElements(child, depth + 1);
+            }
         }
     }
 }

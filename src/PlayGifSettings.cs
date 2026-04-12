@@ -1,30 +1,11 @@
-using System.Collections.Generic;
 using System.ComponentModel;
-using Playnite.SDK;
+using Newtonsoft.Json;
 
 namespace PlayGif
 {
-    public class PlayGifSettings : ISettings, INotifyPropertyChanged
+    public class PlayGifSettings : INotifyPropertyChanged
     {
-        private readonly PlayGif _plugin;
-
         public event PropertyChangedEventHandler PropertyChanged;
-
-        // Serialization constructor
-        public PlayGifSettings() { }
-
-        public PlayGifSettings(PlayGif plugin)
-        {
-            _plugin = plugin;
-            var saved = plugin.LoadPluginSettings<PlayGifSettings>();
-            if (saved != null)
-            {
-                EnableAnimatedDescriptions = saved.EnableAnimatedDescriptions;
-                AutoCacheMedia = saved.AutoCacheMedia;
-                MaxCachePerGameMB = saved.MaxCachePerGameMB;
-                EnableDebugMode = saved.EnableDebugMode;
-            }
-        }
 
         private bool enableAnimatedDescriptions = true;
         public bool EnableAnimatedDescriptions
@@ -54,22 +35,9 @@ namespace PlayGif
             set { enableDebugMode = value; OnPropertyChanged(nameof(EnableDebugMode)); }
         }
 
-        protected void OnPropertyChanged(string name = null)
+        protected void OnPropertyChanged(string name)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-        }
-
-        // ISettings implementation
-        public void BeginEdit() { }
-        public void CancelEdit() { }
-        public void EndEdit()
-        {
-            _plugin.SavePluginSettings(this);
-        }
-        public bool VerifySettings(out List<string> errors)
-        {
-            errors = new List<string>();
-            return true;
         }
     }
 }

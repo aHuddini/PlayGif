@@ -4,6 +4,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Playnite.SDK;
 using Playnite.SDK.Events;
 using Playnite.SDK.Models;
@@ -19,13 +20,14 @@ namespace PlayGif
         private static readonly ILogger Logger = LogManager.GetLogger();
 
         private readonly IPlayniteAPI _api;
-        private PlayGifSettings _settings;
         private PlayGifSettingsViewModel _settingsViewModel;
 
         private DescriptionRendererService _renderer;
         private MediaCacheService _cacheService;
+        private SteamDescriptionService _steamService;
         private DescriptionViewMonitor _viewMonitor;
-        private bool _customElementActive;
+        private Game _lastSelectedGame;
+        private int _injectionAttempts;
 
         public override Guid Id { get; } = Guid.Parse("2e196d25-24d1-4db3-b732-9766c994a496");
 
@@ -34,10 +36,8 @@ namespace PlayGif
             _api = api;
             Properties = new GenericPluginProperties { HasSettings = true };
 
-            _settings = new PlayGifSettings(this);
             _settingsViewModel = new PlayGifSettingsViewModel(this);
 
-            // Register custom element for theme integration
             AddCustomElementSupport(new AddCustomElementSupportArgs
             {
                 SourceName = Constants.CustomElementSource,
@@ -57,27 +57,41 @@ namespace PlayGif
             try
             {
                 var basePath = GetPluginUserDataPath();
+                Logger.Info($"Plugin data path: {basePath}");
 
-                _cacheService = new MediaCacheService(_settings, basePath);
+                _cacheService = new MediaCacheService(Settings, basePath);
+                _steamService = new SteamDescriptionService(basePath);
+                _renderer = new DescriptionRendererService(Settings, () => basePath);
 
-                _renderer = new DescriptionRendererService(_settings, () => basePath);
-                await _renderer.InitializeAsync();
+                // Create the environment (doesn't need visual tree)
+                await _renderer.PrepareEnvironmentAsync();
 
-                if (!_renderer.IsInitialized)
-                {
-                    Logger.Error("WebView2 renderer failed to initialize. Plugin will be inactive.");
-                    return;
-                }
+                // Create the WebView2 control on the UI thread
+                _renderer.CreateWebViewControl();
 
-                // Start visual tree monitor as fallback injection
+                // Set up the visual tree monitor
                 _viewMonitor = new DescriptionViewMonitor(
                     () => _renderer.WebViewControl,
-                    () => _settings.EnableAnimatedDescriptions);
+                    () => Settings.EnableAnimatedDescriptions);
                 _viewMonitor.StartMonitoring();
 
-                // Subscribe to window activation for resource management
-                Application.Current.MainWindow.Activated += OnWindowActivated;
-                Application.Current.MainWindow.Deactivated += OnWindowDeactivated;
+                // Subscribe to window events
+                if (Application.Current?.MainWindow != null)
+                {
+                    Application.Current.MainWindow.Activated += OnWindowActivated;
+                    Application.Current.MainWindow.Deactivated += OnWindowDeactivated;
+                }
+
+                var isFullscreen = _api.ApplicationInfo.Mode == ApplicationMode.Fullscreen;
+                Logger.Info($"Mode: {(isFullscreen ? "Fullscreen" : "Desktop")}. Services prepared. Waiting for visual tree injection.");
+
+                // If a game was already selected, trigger injection + init
+                if (_lastSelectedGame != null)
+                {
+                    Application.Current.Dispatcher.BeginInvoke(
+                        DispatcherPriority.Loaded,
+                        new Action(() => TryInjectAndRender(_lastSelectedGame)));
+                }
             }
             catch (Exception ex)
             {
@@ -87,58 +101,110 @@ namespace PlayGif
 
         public override Control GetGameViewControl(GetGameViewControlArgs args)
         {
-            if (args.Name == Constants.CustomElementName
-                && _renderer?.IsInitialized == true
-                && _settings.EnableAnimatedDescriptions)
-            {
-                _customElementActive = true;
-                return new ContentControl { Content = _renderer.WebViewControl };
-            }
+            // Theme custom element path — not used in fallback mode
             return null;
         }
 
         public override void OnGameSelected(OnGameSelectedEventArgs args)
         {
-            if (_renderer == null || !_renderer.IsInitialized) return;
-            if (!_settings.EnableAnimatedDescriptions) return;
+            if (!Settings.EnableAnimatedDescriptions) return;
 
             var games = args.NewValue;
-            if (games == null || games.Count == 0) return;
+            if (games == null || games.Count != 1) return;
 
-            // Single game selection — show its description
-            if (games.Count == 1)
-            {
-                var game = games[0];
-                UpdateDescription(game);
-            }
-            else
-            {
-                // Multi-selection — hide the renderer
-                _ = _renderer.SetDescriptionAsync(null);
-            }
-        }
+            _lastSelectedGame = games[0];
 
-        private void UpdateDescription(Game game)
-        {
-            var html = game.Description;
-            if (string.IsNullOrEmpty(html))
+            if (_renderer?.WebViewControl == null)
             {
-                _ = _renderer.SetDescriptionAsync(null);
+                Logger.Info($"Renderer not ready, remembering game: {_lastSelectedGame.Name}");
                 return;
             }
 
-            // Rewrite remote URLs to local cache
-            html = _cacheService.RewriteDescriptionHtml(html, game.Id);
+            // Delay to let the visual tree render the detail view
+            Application.Current.Dispatcher.BeginInvoke(
+                DispatcherPriority.Loaded,
+                new Action(() => TryInjectAndRender(_lastSelectedGame)));
+        }
 
-            _ = _renderer.SetDescriptionAsync(html);
-
-            // Sync theme colors
-            UpdateThemeColors();
-
-            // Try visual tree injection if custom element wasn't used
-            if (!_customElementActive && !_viewMonitor.IsInjected)
+        private async void TryInjectAndRender(Game game)
+        {
+            try
             {
-                _viewMonitor.TryInject(Application.Current.MainWindow, _renderer.WebViewControl);
+                if (_renderer?.WebViewControl == null) return;
+
+                // Step 1: Inject into visual tree if not already done
+                if (!_viewMonitor.IsInjected && _injectionAttempts < 5)
+                {
+                    _injectionAttempts++;
+                    Logger.Info($"Attempting visual tree injection (attempt {_injectionAttempts})...");
+                    _viewMonitor.TryInject(Application.Current.MainWindow, _renderer.WebViewControl);
+
+                    if (_viewMonitor.IsInjected)
+                    {
+                        Logger.Info("Injection succeeded. Now initializing WebView2 core...");
+                        await _renderer.InitializeAsync();
+
+                        if (!_renderer.IsInitialized)
+                        {
+                            Logger.Error("WebView2 failed to initialize after injection.");
+                            return;
+                        }
+
+                        // In fullscreen, enable scrolling inside WebView2
+                        if (_api.ApplicationInfo.Mode == ApplicationMode.Fullscreen)
+                        {
+                            _ = _renderer.WebViewControl.CoreWebView2.ExecuteScriptAsync(
+                                "document.body.style.overflow = 'auto'");
+                        }
+
+                        Logger.Info("WebView2 fully initialized.");
+                    }
+                    else
+                    {
+                        Logger.Info("Injection failed — PART_HtmlDescription not found yet.");
+                        return;
+                    }
+                }
+
+                // Step 2: Get the best description available
+                if (!_renderer.IsInitialized) return;
+
+                var html = game.Description;
+                var hasMedia = !string.IsNullOrEmpty(html) &&
+                    (html.Contains("<video") || html.Contains(".webm") || html.Contains(".mp4"));
+
+                // If the stored description lacks media, fetch the rich version from Steam
+                if (!hasMedia && _steamService != null)
+                {
+                    Logger.Info($"Description for {game.Name} has no media ({html?.Length ?? 0} chars). Fetching from Steam...");
+                    var richHtml = await _steamService.GetRichDescriptionAsync(game);
+                    if (!string.IsNullOrEmpty(richHtml))
+                    {
+                        html = richHtml;
+                        Logger.Info($"Got rich description: {html.Length} chars, has video: {html.Contains("<video")}");
+                    }
+                    else
+                    {
+                        Logger.Info("Steam fetch returned nothing. Using original description.");
+                    }
+                }
+
+                if (string.IsNullOrEmpty(html))
+                {
+                    Logger.Info($"No description for: {game.Name}");
+                    _ = _renderer.SetDescriptionAsync(null);
+                    return;
+                }
+
+                Logger.Info($"Rendering: {game.Name} ({html.Length} chars)");
+
+                html = _cacheService.RewriteDescriptionHtml(html, game.Id);
+                _ = _renderer.SetDescriptionAsync(html);
+                UpdateThemeColors();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, $"Error in TryInjectAndRender for: {game?.Name}");
             }
         }
 
@@ -150,7 +216,6 @@ namespace PlayGif
                 var linkColor = GetResourceColor("GlyphColor", Colors.CornflowerBlue);
                 var fontSize = GetResourceDouble("FontSize", 14.0);
                 var fontFamily = GetResourceString("FontFamily", "Segoe UI");
-
                 _renderer.UpdateTheme(textColor, linkColor, fontSize, fontFamily);
             }
             catch { }
@@ -219,10 +284,9 @@ namespace PlayGif
                 Description = "Clear cached media",
                 Action = (menuArgs) =>
                 {
+                    if (_cacheService == null) return;
                     foreach (var game in menuArgs.Games)
-                    {
-                        _cacheService?.ClearGameCache(game.Id);
-                    }
+                        _cacheService.ClearGameCache(game.Id);
                     _api.Dialogs.ShowMessage(
                         $"Cleared cached media for {menuArgs.Games.Count} game(s).",
                         Constants.PluginName);
@@ -235,16 +299,14 @@ namespace PlayGif
                 Description = "Re-download media",
                 Action = (menuArgs) =>
                 {
+                    if (_cacheService == null) return;
                     foreach (var game in menuArgs.Games)
                     {
-                        _cacheService?.ClearGameCache(game.Id);
+                        _cacheService.ClearGameCache(game.Id);
+                        _steamService?.ClearCachedDescription(game.Id);
                     }
-                    // Re-trigger description rendering for the currently selected game
-                    var selected = _api.MainView.SelectedGames?.FirstOrDefault();
-                    if (selected != null)
-                    {
-                        UpdateDescription(selected);
-                    }
+                    if (_renderer?.IsInitialized == true && _lastSelectedGame != null)
+                        TryInjectAndRender(_lastSelectedGame);
                     _api.Dialogs.ShowMessage(
                         "Cache cleared. Media will re-download as you browse.",
                         Constants.PluginName);
@@ -260,7 +322,7 @@ namespace PlayGif
 
         public override ISettings GetSettings(bool firstRunSettings)
         {
-            return _settings;
+            return _settingsViewModel;
         }
 
         public override UserControl GetSettingsView(bool firstRunView)
@@ -268,7 +330,7 @@ namespace PlayGif
             return new PlayGifSettingsView();
         }
 
-        internal PlayGifSettings Settings => _settings;
+        internal PlayGifSettings Settings => _settingsViewModel.Settings;
 
         #endregion
 
@@ -279,7 +341,6 @@ namespace PlayGif
                 Application.Current.MainWindow.Activated -= OnWindowActivated;
                 Application.Current.MainWindow.Deactivated -= OnWindowDeactivated;
             }
-
             _viewMonitor?.Restore();
             _renderer?.Dispose();
         }
