@@ -49,6 +49,13 @@ namespace PlayGif
             set { videoScale = value; OnPropertyChanged(nameof(VideoScale)); }
         }
 
+        private string giphyApiKey = "";
+        public string GiphyApiKey
+        {
+            get => giphyApiKey;
+            set { giphyApiKey = value; OnPropertyChanged(nameof(GiphyApiKey)); }
+        }
+
         private bool enableDebugMode = false;
         public bool EnableDebugMode
         {

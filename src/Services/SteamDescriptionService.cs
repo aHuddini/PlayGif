@@ -20,6 +20,8 @@ namespace PlayGif.Services
 
         private static readonly Guid SteamPluginId =
             Guid.Parse("CB91DFC9-B977-43BF-8E70-55F46E410FAB");
+        private static readonly Guid GogPluginId =
+            Guid.Parse("AEBE8B7C-6DC3-4A66-AF31-E7375C6B5E9E");
 
         private const int MaxRetries = 10;
         private const int RetryDelayMs = 2500;
@@ -201,6 +203,66 @@ namespace PlayGif.Services
             return null;
         }
 
+        // GOG support
+        public string ResolveGogProductId(Game game)
+        {
+            if (game.PluginId == GogPluginId && !string.IsNullOrEmpty(game.GameId))
+                return game.GameId;
+
+            if (game.Links != null)
+            {
+                foreach (var link in game.Links)
+                {
+                    if (link.Url != null && link.Url.Contains("gog.com/"))
+                    {
+                        // Try to extract product ID from GOG URL
+                        var parts = link.Url.Split('/');
+                        for (int i = parts.Length - 1; i >= 0; i--)
+                        {
+                            if (long.TryParse(parts[i], out _))
+                                return parts[i];
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        public async Task<string> FetchGogDescriptionAsync(Game game)
+        {
+            var cached = LoadCachedDescription(game.Id);
+            if (cached != null) return cached;
+
+            var productId = ResolveGogProductId(game);
+            if (string.IsNullOrEmpty(productId))
+            {
+                Logger.Info($"Could not resolve GOG product ID for: {game.Name}");
+                return null;
+            }
+
+            try
+            {
+                var url = $"https://api.gog.com/products/{productId}?expand=description";
+                var response = await HttpClient.GetStringAsync(url);
+
+                var json = JObject.Parse(response);
+                var description = json["description"]?["full"]?.ToString();
+
+                if (!string.IsNullOrEmpty(description))
+                {
+                    SaveCachedDescription(game.Id, description);
+                    Logger.Info($"Fetched GOG description for: {game.Name} (ID: {productId}, {description.Length} chars)");
+                }
+
+                return description;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, $"Failed to fetch GOG description for: {game.Name} (ID: {productId})");
+                return null;
+            }
+        }
+
         public bool HasCachedDescription(Guid gameId)
         {
             return File.Exists(GetDescriptionCachePath(gameId));
@@ -231,6 +293,20 @@ namespace PlayGif.Services
             var dir = Path.GetDirectoryName(path);
             Directory.CreateDirectory(dir);
             File.WriteAllText(path, html);
+        }
+
+        public void UpdateCachedDescription(Guid gameId, string tag, string position)
+        {
+            var path = GetDescriptionCachePath(gameId);
+            if (File.Exists(path))
+            {
+                var html = File.ReadAllText(path);
+                if (position == "top")
+                    html = tag + "\n" + html;
+                else
+                    html = html + "\n" + tag;
+                File.WriteAllText(path, html);
+            }
         }
 
         public void ClearCachedDescription(Guid gameId)
