@@ -3,6 +3,10 @@
 ![License](https://img.shields.io/badge/license-MIT-green) ![Playnite SDK](https://img.shields.io/badge/Playnite%20SDK-6.16.0-purple) ![Total Downloads](https://img.shields.io/github/downloads/aHuddini/PlayGif/total?label=downloads&color=brightgreen) ![Latest Release Downloads](https://img.shields.io/github/downloads/aHuddini/PlayGif/latest/total?label=latest%20release&color=blue)
 
 <p align="center">
+  <img src="docs/assets/logo-animated.gif" alt="PlayGif" width="180">
+</p>
+
+<p align="center">
   <img src="docs/assets/GHdisplay.png" alt="PlayGif" width="420">
 </p>
 
