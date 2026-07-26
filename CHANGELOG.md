@@ -14,7 +14,7 @@ All notable changes to PlayGif will be documented in this file.
 
 - **Theme Support settings tab.** Runs a layout report describing what PlayGif found in the theme's visual tree, reports whether the renderer is attached and which view is active, and links to the log folder. Per-theme compatibility patches will live here if a theme ever needs one.
 - **Open debug log folder** menu item and settings button, which selects `extension.log` in Explorer.
-- **Known Issues** documented in the Theme Support tab and the README. Playnite has no official support for animated descriptions, so the renderer is injected into whatever panel a theme builds; themes vary and other extensions modify the same panel. Includes buttons linking to the issue tracker and project page.
+- **Known Issues settings tab.** Playnite has no official support for animated descriptions, so the renderer is injected into whatever panel a theme builds; themes vary and other extensions modify the same panel. The tab names the symptoms, lists what a useful bug report needs, and links to the issue tracker and project page. Mirrored as a Known Issues section in the README.
 
 ### Changed
 - Renderer event handlers (`HeightReported`, `ScrollOverflow`) are wired once instead of per injection, since re-attachment reuses the same renderer and would otherwise stack duplicate subscriptions.

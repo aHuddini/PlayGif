@@ -102,19 +102,40 @@
 
                     <Separator Margin="0,0,0,16"/>
 
-                    <TextBlock Text="Known Issues" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,0,0,8"
-                               Text="Playnite has no official support for animated descriptions, so PlayGif injects its renderer into whatever description panel your theme builds. Themes lay that out very differently, and other extensions modify it too."/>
-                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="12,0,0,3"
+                    <TextBlock Text="Compatibility Patches" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.7" Margin="0,0,0,8"
+                               Text="Per-theme layout overrides appear here when a theme needs one. None are required at the moment — view detection and re-attachment are handled automatically for every theme."/>
+                </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+
+        <!-- Known Issues Tab -->
+        <TabItem Header="Known Issues">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="20">
+                    <TextBlock Text="Theme Compatibility" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,0,0,10"
+                               Text="Playnite has no official support for animated descriptions, so PlayGif injects its renderer into whatever description panel your theme builds. Themes lay that out very differently, and other extensions modify the same panel."/>
+
+                    <TextBlock Text="What you might run into" FontWeight="SemiBold" Margin="0,4,0,6"/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="12,0,0,4"
                                Text="- Visual glitches: clipped text, blank gaps, content in the wrong place, or flicker while scrolling"/>
-                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="12,0,0,3"
-                               Text="- Some themes may not animate at all"/>
-                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="12,0,0,8"
+                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="12,0,0,4"
+                               Text="- Some themes may not work at all"/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="12,0,0,4"
                                Text="- Problems that only appear alongside another extension, since several also modify the details view (HowLongToBeat, achievements plugins, screenshot viewers)"/>
-                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,0,0,8"
-                               Text="Please report these — most are fixable once I can see what your theme is doing. Run the layout report above, then open an issue with it, your theme name, and any other extensions that touch the details view."/>
-                    <TextBlock TextWrapping="Wrap" Opacity="0.6" Margin="0,0,0,10"
-                               Text="The long-term fix is official Playnite support for animated content, which would remove the need to inject anything at all."/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="12,0,0,12"
+                               Text="- Fullscreen mode is experimental and disabled by default"/>
+
+                    <TextBlock Text="Reporting a problem" FontWeight="SemiBold" Margin="0,4,0,6"/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,0,0,6"
+                               Text="Please report these. I will look into what I can, though some theme layouts may be out of reach. Include:"/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="12,0,0,4"
+                               Text="1. A layout report — Theme Support tab, 'Run layout report'"/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="12,0,0,4"
+                               Text="2. The name of your theme"/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="12,0,0,12"
+                               Text="3. Any other extensions that touch the details view"/>
 
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
                         <Button Content="Report an issue"
@@ -125,11 +146,10 @@
                                 Padding="12,6"/>
                     </StackPanel>
 
-                    <Separator Margin="0,0,0,16"/>
+                    <Separator Margin="0,0,0,12"/>
 
-                    <TextBlock Text="Compatibility Patches" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                    <TextBlock TextWrapping="Wrap" Opacity="0.7" Margin="0,0,0,8"
-                               Text="Per-theme layout overrides appear here when a theme needs one. None are required at the moment — view detection and re-attachment are handled automatically for every theme."/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.6"
+                               Text="The long-term fix is official Playnite support for animated content in descriptions, which would remove the need to inject anything at all."/>
                 </StackPanel>
             </ScrollViewer>
         </TabItem>

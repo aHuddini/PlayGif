@@ -100,7 +100,7 @@ What that can look like:
 - Descriptions that don't animate at all in a particular theme
 - Problems that appear only when another extension is installed, because several also modify the details view (HowLongToBeat, achievements plugins, screenshot viewers, and others)
 
-If you hit any of this, please report it — most of these are fixable once I can see what your theme is doing:
+If you hit any of this, please report it. I'll look into what I can, though some theme layouts may be out of reach:
 
 1. **Settings → PlayGif → Theme Support → Run layout report**
 2. Open an [issue](https://github.com/aHuddini/PlayGif/issues) with the report, your theme name, and any other extensions that touch the details view
