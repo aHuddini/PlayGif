@@ -129,7 +129,7 @@
 
                     <TextBlock Text="Reporting a problem" FontWeight="SemiBold" Margin="0,4,0,6"/>
                     <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,0,0,6"
-                               Text="Please report these. I will look into what I can, though some theme layouts may be out of reach. Include:"/>
+                               Text="Reports are welcome. Some theme layouts may be out of reach, but a report helps identify which ones. Include:"/>
                     <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="12,0,0,4"
                                Text="1. A layout report — Theme Support tab, 'Run layout report'"/>
                     <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="12,0,0,4"
