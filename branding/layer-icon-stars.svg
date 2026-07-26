@@ -1,0 +1,28 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- PlayGif icon. Golden-ratio construction on a 256 canvas:
+       screen 224 wide / 138.4 tall (224 Ã· Ï†), centred at y=58.8.
+       The sword doubles as the motion line â€” one stroke, two meanings. -->
+  <defs>
+    <!-- Blue gradient: deep indigo -> cyan, travelling with the sword's diagonal -->
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <!-- Glassmorphic screen fill -->
+    <linearGradient id="glass" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#60A5FA" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#0EA5E9" stop-opacity="0.06"/>
+    </linearGradient>
+    <linearGradient id="blade" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#DBEAFE"/>
+      <stop offset="0.55" stop-color="#93C5FD"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+  </defs>
+  <g id="stars" fill="#E0F2FE">
+    <path d="M 196 48 L 200 58 L 210 62 L 200 66 L 196 76 L 192 66 L 182 62 L 192 58 Z" fill-opacity="0.95"/>
+    <path d="M 152 92 L 154.5 98.5 L 161 101 L 154.5 103.5 L 152 110 L 149.5 103.5 L 143 101 L 149.5 98.5 Z" fill-opacity="0.75"/>
+    <path d="M 206 106 L 208 111 L 213 113 L 208 115 L 206 120 L 204 115 L 199 113 L 204 111 Z" fill-opacity="0.6"/>
+  </g>
+</svg>
+

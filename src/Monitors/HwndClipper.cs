@@ -24,6 +24,8 @@ namespace PlayGif.Monitors
         private readonly WebView2 _webView;
         private readonly ScrollViewer _scrollViewer;
         private Window _window;
+        // Last region actually handed to SetWindowRgn, in HWND-local device pixels
+        private Rect? _lastRegion;
 
         public HwndClipper(WebView2 webView, ScrollViewer scrollViewer)
         {
@@ -36,10 +38,21 @@ namespace PlayGif.Monitors
             if (_scrollViewer == null) return;
             _scrollViewer.ScrollChanged += OnScrollChanged;
             _scrollViewer.SizeChanged += OnSizeChanged;
+            // The WebView grows when content loads — without this the clip region
+            // keeps the old, shorter rectangle and the extra text stays hidden
+            _webView.SizeChanged += OnSizeChanged;
+            // Catches offset/layout shifts that raise no scroll or size event.
+            // Cheap: the region cache turns most of these into a no-op.
+            _webView.LayoutUpdated += OnLayoutUpdated;
             // Initial clip after a short delay to let layout settle
             _webView.Dispatcher.BeginInvoke(
                 System.Windows.Threading.DispatcherPriority.Loaded,
                 new Action(() => UpdateClipRegion()));
+        }
+
+        private void OnLayoutUpdated(object sender, EventArgs e)
+        {
+            UpdateClipRegion();
         }
 
         public void Detach()
@@ -49,19 +62,29 @@ namespace PlayGif.Monitors
                 _scrollViewer.ScrollChanged -= OnScrollChanged;
                 _scrollViewer.SizeChanged -= OnSizeChanged;
             }
+            if (_webView != null)
+            {
+                _webView.SizeChanged -= OnSizeChanged;
+                _webView.LayoutUpdated -= OnLayoutUpdated;
+            }
         }
 
         private void OnScrollChanged(object sender, ScrollChangedEventArgs e)
         {
-            // Only update clip when the main page scrolls (not WebView2 internal scroll)
-            // VerticalChange != 0 means the ScrollViewer's offset changed
-            if (e.VerticalChange != 0 || e.ViewportHeightChange != 0)
-                UpdateClipRegion();
+            // Always recompute — the region cache below skips the GDI call when
+            // nothing actually moved, so filtering on VerticalChange here only
+            // risks missing offset changes that report zero delta
+            UpdateClipRegion();
         }
 
         private void OnSizeChanged(object sender, SizeChangedEventArgs e)
         {
+            // Re-clip now, then again once layout has settled — on a size change the
+            // ScrollViewer may not have updated its viewport/extent yet
             UpdateClipRegion();
+            _webView.Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.Loaded,
+                new Action(() => UpdateClipRegion()));
         }
 
         public void UpdateClipRegion()
@@ -95,20 +118,35 @@ namespace PlayGif.Monitors
 
                 if (intersect.IsEmpty)
                 {
+                    if (_lastRegion.HasValue && _lastRegion.Value.IsEmpty) return;
+                    _lastRegion = Rect.Empty;
+
                     var emptyRgn = CreateRectRgn(0, 0, 0, 0);
                     SetWindowRgn(webViewHwnd, emptyRgn, true);
                 }
                 else
                 {
+                    // Region coordinates are HWND-local. Scrolling moves the WebView, so
+                    // the same window-space intersection maps to a different local rect —
+                    // the comparison must happen after this transform, not before it.
                     var localTransform = _window.TransformToDescendant(_webView);
                     var localRect = localTransform.TransformBounds(intersect);
 
                     var dpi = VisualTreeHelper.GetDpi(_webView);
-                    var rgn = CreateRectRgn(
+                    var region = new Rect(
                         (int)(localRect.X * dpi.DpiScaleX),
                         (int)(localRect.Y * dpi.DpiScaleY),
-                        (int)((localRect.X + localRect.Width) * dpi.DpiScaleX),
-                        (int)((localRect.Y + localRect.Height) * dpi.DpiScaleY));
+                        (int)(localRect.Width * dpi.DpiScaleX),
+                        (int)(localRect.Height * dpi.DpiScaleY));
+
+                    if (_lastRegion.HasValue && region == _lastRegion.Value) return;
+                    _lastRegion = region;
+
+                    var rgn = CreateRectRgn(
+                        (int)region.X,
+                        (int)region.Y,
+                        (int)(region.X + region.Width),
+                        (int)(region.Y + region.Height));
                     SetWindowRgn(webViewHwnd, rgn, false);
                 }
             }

@@ -1,0 +1,27 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" width="640" height="256" viewBox="0 0 640 256">
+  <!-- PlayGif banner. Mark on the left, wordmark on the right at the golden
+       division of the 640 canvas (640 Ã· Ï† â‰ˆ 395 â†’ mark occupies the left third). -->
+  <defs>
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#60A5FA" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#0EA5E9" stop-opacity="0.06"/>
+    </linearGradient>
+    <linearGradient id="blade" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#DBEAFE"/>
+      <stop offset="0.55" stop-color="#93C5FD"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+  </defs>
+  <g id="tv">
+    <rect x="40" y="62" width="176" height="109" rx="16" fill="#0B1220" stroke="url(#acc)" stroke-width="7"/>
+    <rect x="49" y="71" width="158" height="91" rx="10" fill="url(#glass)"/>
+    <path d="M 49 80 Q 128 114 207 80 L 207 71 Q 207 71 198 71 L 58 71 Q 49 71 49 80 Z" fill="#E0F2FE" fill-opacity="0.10"/>
+    <rect x="120" y="171" width="16" height="16" fill="url(#acc)"/>
+    <rect x="86" y="187" width="84" height="10" rx="5" fill="url(#acc)"/>
+  </g>
+</svg>
+

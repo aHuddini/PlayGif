@@ -26,8 +26,20 @@ namespace PlayGif
         private MediaCacheService _cacheService;
         private SteamDescriptionService _steamService;
         private DescriptionViewMonitor _viewMonitor;
+        private Handlers.MediaLibraryHandler _mediaLibrary;
         private Game _lastSelectedGame;
         private int _injectionAttempts;
+
+        // Menu handlers are built on first use — the menu can be opened before services initialize
+        private Handlers.MediaLibraryHandler MediaLibrary => _mediaLibrary ??
+            (_mediaLibrary = new Handlers.MediaLibraryHandler(
+                _api,
+                (id) => System.IO.Path.Combine(
+                    GetPluginUserDataPath(), Common.Constants.GamesCacheFolder, id.ToString()),
+                (game) =>
+                {
+                    if (_lastSelectedGame?.Id == game.Id) TryInjectAndRender(game);
+                }));
 
         public override Guid Id { get; } = Guid.Parse("2e196d25-24d1-4db3-b732-9766c994a496");
 
@@ -83,7 +95,7 @@ namespace PlayGif
                 }
 
                 var isFullscreen = _api.ApplicationInfo.Mode == ApplicationMode.Fullscreen;
-                Logger.Info($"Mode: {(isFullscreen ? "Fullscreen" : "Desktop")}. Services prepared.");
+                Logger.Info($"Mode: {(isFullscreen ? "Fullscreen" : "Desktop")}. EnableInFullscreen: {Settings.EnableInFullscreen}. Services prepared.");
 
                 if (isFullscreen && !Settings.EnableInFullscreen)
                 {
@@ -141,6 +153,7 @@ namespace PlayGif
         public override void OnFullscreenViewChanged(OnFullscreenViewChangedArgs args)
         {
             if (!Settings.EnableAnimatedDescriptions) return;
+            if (!Settings.EnableInFullscreen) return;
             if (_renderer?.WebViewControl == null) return;
 
             if (args.NewView == FullscreenView.Details && _lastSelectedGame != null)
@@ -191,6 +204,11 @@ namespace PlayGif
                             Application.Current.Dispatcher.BeginInvoke(new Action(() =>
                             {
                                 _renderer.WebViewControl.Height = height;
+                                // Re-clip after the new height lays out, otherwise the
+                                // HWND region still masks part of the description
+                                Application.Current.Dispatcher.BeginInvoke(
+                                    DispatcherPriority.Loaded,
+                                    new Action(() => _viewMonitor?.RefreshClip()));
                             }));
                         };
 
@@ -288,16 +306,16 @@ namespace PlayGif
                         $"setPosterOnly({(Settings.UseVideoPosterOnly ? "true" : "false")})");
 
                 if (Settings.UseVideoPosterOnly)
-                {
                     html = ReplaceVideosWithPosters(html);
-                    Logger.Info($"After poster replacement: {html.Length} chars, has video: {html.Contains("<video")}");
-                    Logger.Info($"Poster preview: {html.Substring(0, System.Math.Min(300, html.Length))}");
-                }
 
                 html = _cacheService.RewriteDescriptionHtml(html, game.Id);
-                Logger.Info($"After rewrite: playgif.local present: {html.Contains(Common.Constants.VirtualHostName)}");
 
                 _ = _renderer.SetDescriptionAsync(html);
+
+                // New content may occupy the same height, so no SizeChanged fires
+                Application.Current.Dispatcher.BeginInvoke(
+                    DispatcherPriority.Loaded,
+                    new Action(() => _viewMonitor?.RefreshClip()));
                 UpdateThemeColors();
 
                 // Apply video scale — per-game override or global default
@@ -344,16 +362,11 @@ namespace PlayGif
                             var srcUrl = source.GetAttributeValue("src", "");
                             if (!string.IsNullOrEmpty(srcUrl))
                             {
-                                // Keep video but disable playback — shows first frame
+                                // Keep video but disable playback — shows first frame.
+                                // Source selection is handled by RewriteDescriptionHtml.
                                 video.SetAttributeValue("preload", "metadata");
                                 video.Attributes.Remove("autoplay");
                                 video.Attributes.Remove("loop");
-                                // Remove all source elements except the MP4
-                                foreach (var s in video.SelectNodes(".//source")?.ToList()
-                                    ?? new System.Collections.Generic.List<HtmlAgilityPack.HtmlNode>())
-                                {
-                                    if (s != source) s.Remove();
-                                }
                                 continue;
                             }
                         }
@@ -406,44 +419,6 @@ namespace PlayGif
             }
         }
 
-        private async void PreviewAndInsertMedia(Game game, string url, string position)
-        {
-            try
-            {
-                var uri = new Uri(url);
-                var fileName = SanitizeFileName(System.IO.Path.GetFileName(uri.AbsolutePath));
-                if (string.IsNullOrEmpty(fileName) || !fileName.Contains("."))
-                    fileName = "media" + (url.Contains(".webm") ? ".webm" : url.Contains(".gif") ? ".gif" : ".mp4");
-
-                var gameDir = System.IO.Path.Combine(
-                    GetPluginUserDataPath(), Common.Constants.GamesCacheFolder, game.Id.ToString());
-                System.IO.Directory.CreateDirectory(gameDir);
-                var destPath = System.IO.Path.Combine(gameDir, fileName);
-
-                // Download the file
-                using (var client = new System.Net.Http.HttpClient())
-                {
-                    var bytes = await client.GetByteArrayAsync(url);
-                    System.IO.File.WriteAllBytes(destPath, bytes);
-                }
-
-                var localUrl = $"https://{Common.Constants.VirtualHostName}/{game.Id}/{fileName}";
-                var ext = System.IO.Path.GetExtension(fileName).ToLowerInvariant();
-                var tag = BuildMediaTag(localUrl, ext);
-                var fileSize = new System.IO.FileInfo(destPath).Length / 1024.0;
-
-                InsertMediaTag(game, tag, position);
-            }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, $"Failed to preview media from: {url}");
-                _api.Dialogs.ShowMessage($"Failed to download: {ex.Message}", Constants.PluginName);
-                // Restore original
-                if (_lastSelectedGame?.Id == game.Id)
-                    TryInjectAndRender(game);
-            }
-        }
-
         private async void DownloadAndInsertMedia(Game game, string url, string position)
         {
             try
@@ -458,24 +433,14 @@ namespace PlayGif
                 System.IO.Directory.CreateDirectory(gameDir);
                 var destPath = System.IO.Path.Combine(gameDir, fileName);
 
-                // Download the file
-                using (var client = new System.Net.Http.HttpClient())
-                {
-                    var bytes = await client.GetByteArrayAsync(url);
-                    System.IO.File.WriteAllBytes(destPath, bytes);
-                }
+                await MediaCacheService.DownloadToFileAsync(url, destPath);
 
                 var localUrl = $"https://{Common.Constants.VirtualHostName}/{game.Id}/{fileName}";
                 var ext = System.IO.Path.GetExtension(fileName).ToLowerInvariant();
                 var tag = BuildMediaTag(localUrl, ext);
 
                 Application.Current.Dispatcher.Invoke(() =>
-                {
-                    InsertMediaTag(game, tag, position);
-                    _api.Dialogs.ShowMessage(
-                        $"Downloaded and added {fileName} to {game.Name} ({position}).",
-                        Constants.PluginName);
-                });
+                    InsertMediaTag(game, tag, position));
             }
             catch (Exception ex)
             {
@@ -589,12 +554,6 @@ namespace PlayGif
             return name;
         }
 
-        private static string ExtractFilenameFromTag(string tag)
-        {
-            var match = System.Text.RegularExpressions.Regex.Match(tag, @"playgif\.local/[^/]+/([^""']+)");
-            return match.Success ? match.Groups[1].Value : "unknown";
-        }
-
         private string BuildMediaTag(string url, string ext)
         {
             if (ext == ".gif" || ext == ".webp" || ext == ".apng" || ext == ".png" ||
@@ -624,8 +583,12 @@ namespace PlayGif
                 _steamService.UpdateCachedDescription(game.Id, tag, position);
             }
 
+            // Keep the selected-game snapshot in sync so the re-render sees the new tag
             if (_lastSelectedGame?.Id == game.Id)
+            {
+                _lastSelectedGame = game;
                 TryInjectAndRender(game);
+            }
         }
 
         private void FetchStoreDescription(System.Collections.Generic.List<Game> games, string store)
@@ -689,21 +652,23 @@ namespace PlayGif
                             return;
                         }
 
-                        var videoCount = System.Text.RegularExpressions.Regex.Matches(html, "<video").Count;
-                        var imgCount = System.Text.RegularExpressions.Regex.Matches(html, "<img").Count;
-
-                        _api.Dialogs.ShowMessage(
-                            $"Fetched from {storeName} for: {capturedGame.Name}\n" +
-                            $"Store ID: {capturedId}\n" +
-                            $"Size: {html.Length} chars\n" +
-                            $"Videos: {videoCount}  |  Images: {imgCount}\n" +
-                            $"Has .webm: {html.Contains(".webm")}  |  Has .mp4: {html.Contains(".mp4")}\n\n" +
-                            $"First 500 chars:\n" +
-                            html.Substring(0, System.Math.Min(500, html.Length)),
-                            Constants.PluginName);
+                        if (Settings.EnableDebugMode)
+                        {
+                            var videoCount = System.Text.RegularExpressions.Regex.Matches(html, "<video").Count;
+                            var imgCount = System.Text.RegularExpressions.Regex.Matches(html, "<img").Count;
+                            _api.Dialogs.ShowMessage(
+                                $"Fetched from {storeName} for: {capturedGame.Name}\n" +
+                                $"Store ID: {capturedId}\n" +
+                                $"Size: {html.Length} chars\n" +
+                                $"Videos: {videoCount}  |  Images: {imgCount}",
+                                Constants.PluginName);
+                        }
 
                         if (_lastSelectedGame?.Id == capturedGame.Id)
+                        {
+                            _lastSelectedGame = capturedGame;
                             TryInjectAndRender(capturedGame);
+                        }
                     }));
                 });
             }
@@ -779,25 +744,153 @@ namespace PlayGif
         {
             var items = new List<GameMenuItem>();
 
+            // Video scale — first in menu
+            foreach (var pct in new[] { 75, 50, 25 })
+            {
+                var scale = pct;
+                items.Add(new GameMenuItem
+                {
+                    MenuSection = Constants.MenuSectionName + "|Video scale",
+                    Description = $"{scale}%",
+                    Action = (menuArgs) =>
+                    {
+                        foreach (var game in menuArgs.Games)
+                            _cacheService?.SetGameVideoScale(game.Id, scale);
+                        if (_renderer?.IsInitialized == true)
+                            _ = _renderer.WebViewControl.CoreWebView2.ExecuteScriptAsync(
+                                $"setVideoScale({scale})");
+                    }
+                });
+            }
+
+            items.Add(new GameMenuItem
+            {
+                MenuSection = Constants.MenuSectionName + "|Video scale",
+                Description = "Reset to default",
+                Action = (menuArgs) =>
+                {
+                    foreach (var game in menuArgs.Games)
+                        _cacheService?.SetGameVideoScale(game.Id, null);
+                    if (_renderer?.IsInitialized == true)
+                        _ = _renderer.WebViewControl.CoreWebView2.ExecuteScriptAsync(
+                            $"setVideoScale({Settings.VideoScale})");
+                }
+            });
+
+            items.Add(new GameMenuItem
+            {
+                MenuSection = Constants.MenuSectionName + "|Fetch description",
+                Description = "From Steam",
+                Action = (menuArgs) =>
+                {
+                    FetchStoreDescription(menuArgs.Games, "steam");
+                }
+            });
+
+            items.Add(new GameMenuItem
+            {
+                MenuSection = Constants.MenuSectionName + "|Fetch description",
+                Description = "From GOG",
+                Action = (menuArgs) =>
+                {
+                    FetchStoreDescription(menuArgs.Games, "gog");
+                }
+            });
+
+            // Add media — position picks the submenu, source picks the row
+            foreach (var position in new[] { "top", "bottom" })
+            {
+                var pos = position;
+                var section = Constants.MenuSectionName + "|Add media|" +
+                    (pos == "top" ? "To top" : "To bottom");
+
+                items.Add(new GameMenuItem
+                {
+                    MenuSection = section,
+                    Description = "Local file",
+                    Action = (menuArgs) =>
+                    {
+                        var game = menuArgs.Games.FirstOrDefault();
+                        if (game == null) return;
+
+                        var filePath = _api.Dialogs.SelectFile(
+                            "Media files|*.gif;*.mp4;*.webp;*.apng;*.avif;*.png;*.jpg|All files|*.*");
+                        if (string.IsNullOrEmpty(filePath)) return;
+
+                        var tag = CopyAndBuildMediaTag(game, filePath);
+                        if (tag != null) InsertMediaTag(game, tag, pos);
+                    }
+                });
+
+                items.Add(new GameMenuItem
+                {
+                    MenuSection = section,
+                    Description = "From URL",
+                    Action = (menuArgs) =>
+                    {
+                        var game = menuArgs.Games.FirstOrDefault();
+                        if (game == null) return;
+
+                        var input = _api.Dialogs.SelectString(
+                            "Enter media URL (GIF, MP4, image):", Constants.PluginName, "");
+                        if (input == null || !input.Result ||
+                            string.IsNullOrWhiteSpace(input.SelectedString)) return;
+
+                        DownloadAndInsertMedia(game, input.SelectedString.Trim(), pos);
+                    }
+                });
+
+                items.Add(new GameMenuItem
+                {
+                    MenuSection = section,
+                    Description = "Search web images",
+                    Action = (menuArgs) =>
+                    {
+                        var game = menuArgs.Games.FirstOrDefault();
+                        if (game == null) return;
+                        SearchWebImages(game, pos);
+                    }
+                });
+            }
+
             items.Add(new GameMenuItem
             {
                 MenuSection = Constants.MenuSectionName,
-                Description = "Clear cached media",
+                Description = "Remove media...",
                 Action = (menuArgs) =>
                 {
-                    if (_cacheService == null) return;
-                    foreach (var game in menuArgs.Games)
-                        _cacheService.ClearGameCache(game.Id);
-                    _api.Dialogs.ShowMessage(
-                        $"Cleared cached media for {menuArgs.Games.Count} game(s).",
-                        Constants.PluginName);
+                    var game = menuArgs.Games.FirstOrDefault();
+                    if (game != null) MediaLibrary.RemoveMedia(game);
                 }
             });
 
             items.Add(new GameMenuItem
             {
                 MenuSection = Constants.MenuSectionName,
-                Description = "Preview description HTML",
+                Description = "Refresh description",
+                Action = (menuArgs) =>
+                {
+                    if (_cacheService == null) return;
+                    foreach (var game in menuArgs.Games)
+                    {
+                        _cacheService.ClearGameCache(game.Id);
+                        _steamService?.ClearCachedDescription(game.Id);
+                    }
+                    if (_renderer?.IsInitialized == true && _lastSelectedGame != null)
+                        TryInjectAndRender(_lastSelectedGame);
+                    _api.Dialogs.ShowMessage(
+                        "Description refreshed. Media will reload as you browse.",
+                        Constants.PluginName);
+                }
+            });
+
+            // Diagnostic — hidden unless debug mode is on
+            if (!Settings.EnableDebugMode) return items;
+
+            items.Add(new GameMenuItem
+            {
+                MenuSection = Constants.MenuSectionName,
+                Description = "Preview description",
                 Action = (menuArgs) =>
                 {
                     var game = menuArgs.Games.FirstOrDefault();
@@ -805,7 +898,6 @@ namespace PlayGif
 
                     var storedHtml = game.Description ?? "";
 
-                    // Check both stored and cached
                     string cachedHtml = "";
                     var hasCached = _steamService?.HasCachedDescription(game.Id) == true;
                     if (hasCached)
@@ -855,246 +947,10 @@ namespace PlayGif
                         AnalyzeHtml(storedHtml, "Stored Description") + "\n" +
                         (hasCached ? AnalyzeHtml(cachedHtml, "Cached Rich Description") : "");
 
-                    // Save to temp file and open so user can copy
                     var tempPath = System.IO.Path.Combine(
                         System.IO.Path.GetTempPath(), $"PlayGif_Preview_{game.Name}.txt");
                     System.IO.File.WriteAllText(tempPath, msg);
                     System.Diagnostics.Process.Start(tempPath);
-                }
-            });
-
-            items.Add(new GameMenuItem
-            {
-                MenuSection = Constants.MenuSectionName + "|Fetch description",
-                Description = "From Steam",
-                Action = (menuArgs) =>
-                {
-                    FetchStoreDescription(menuArgs.Games, "steam");
-                }
-            });
-
-            items.Add(new GameMenuItem
-            {
-                MenuSection = Constants.MenuSectionName + "|Fetch description",
-                Description = "From GOG",
-                Action = (menuArgs) =>
-                {
-                    FetchStoreDescription(menuArgs.Games, "gog");
-                }
-            });
-
-            // Add media — local file, top/bottom
-            foreach (var position in new[] { "top", "bottom" })
-            {
-                var pos = position;
-                items.Add(new GameMenuItem
-                {
-                    MenuSection = Constants.MenuSectionName + "|Add media to description",
-                    Description = $"Local file → {pos}",
-                    Action = (menuArgs) =>
-                    {
-                        var game = menuArgs.Games.FirstOrDefault();
-                        if (game == null) return;
-
-                        var filePath = _api.Dialogs.SelectFile(
-                            "Media files|*.gif;*.webm;*.mp4;*.webp;*.apng;*.avif|All files|*.*");
-                        if (string.IsNullOrEmpty(filePath)) return;
-
-                        var tag = CopyAndBuildMediaTag(game, filePath);
-                        if (tag == null) return;
-
-                        InsertMediaTag(game, tag, pos);
-                    }
-                });
-
-                items.Add(new GameMenuItem
-                {
-                    MenuSection = Constants.MenuSectionName + "|Add media to description",
-                    Description = $"From URL → {pos}",
-                    Action = (menuArgs) =>
-                    {
-                        var game = menuArgs.Games.FirstOrDefault();
-                        if (game == null) return;
-
-                        var input = _api.Dialogs.SelectString(
-                            "Enter media URL (GIF, WebM, MP4, image):",
-                            Constants.PluginName, "");
-                        if (input == null || !input.Result || string.IsNullOrWhiteSpace(input.SelectedString))
-                            return;
-
-                        var mediaUrl = input.SelectedString.Trim();
-                        PreviewAndInsertMedia(game, mediaUrl, pos);
-                    }
-                });
-            }
-
-            // Web image search
-            foreach (var position in new[] { "top", "bottom" })
-            {
-                var pos = position;
-                items.Add(new GameMenuItem
-                {
-                    MenuSection = Constants.MenuSectionName + "|Add media to description",
-                    Description = $"Search web images → {pos}",
-                    Action = (menuArgs) =>
-                    {
-                        var game = menuArgs.Games.FirstOrDefault();
-                        if (game == null) return;
-                        SearchWebImages(game, pos);
-                    }
-                });
-            }
-
-            items.Add(new GameMenuItem
-            {
-                MenuSection = Constants.MenuSectionName,
-                Description = "Remove added media",
-                Action = (menuArgs) =>
-                {
-                    var game = menuArgs.Games.FirstOrDefault();
-                    if (game == null) return;
-
-                    var virtualHost = Common.Constants.VirtualHostName;
-                    var pattern = $"(<img[^>]*{virtualHost}[^>]*/>|<video[^>]*>.*?{virtualHost}.*?</video>)";
-
-                    // Check both stored and cached descriptions
-                    var desc = game.Description ?? "";
-                    var cachedDesc = "";
-                    var hasCached = _steamService?.HasCachedDescription(game.Id) == true;
-                    if (hasCached)
-                    {
-                        var task = _steamService.GetRichDescriptionAsync(game);
-                        cachedDesc = task.GetAwaiter().GetResult() ?? "";
-                    }
-
-                    var storedMatches = System.Text.RegularExpressions.Regex.Matches(
-                        desc, pattern, System.Text.RegularExpressions.RegexOptions.Singleline);
-                    var cachedMatches = System.Text.RegularExpressions.Regex.Matches(
-                        cachedDesc, pattern, System.Text.RegularExpressions.RegexOptions.Singleline);
-
-                    // Build list of all found media
-                    var allMatches = new System.Collections.Generic.List<(string match, string source, string name)>();
-                    foreach (System.Text.RegularExpressions.Match m in storedMatches)
-                    {
-                        var fname = ExtractFilenameFromTag(m.Value);
-                        allMatches.Add((m.Value, "stored", fname));
-                    }
-                    foreach (System.Text.RegularExpressions.Match m in cachedMatches)
-                    {
-                        var fname = ExtractFilenameFromTag(m.Value);
-                        if (!allMatches.Exists(a => a.name == fname))
-                            allMatches.Add((m.Value, "cached", fname));
-                    }
-
-                    if (allMatches.Count == 0)
-                    {
-                        _api.Dialogs.ShowMessage(
-                            "No manually-added PlayGif media found.",
-                            Constants.PluginName);
-                        return;
-                    }
-
-                    // Let user pick which to remove
-                    var choices = allMatches.Select(a =>
-                        new GenericItemOption(a.name, $"Source: {a.source}")).ToList();
-
-                    var selected = _api.Dialogs.ChooseItemWithSearch(
-                        choices,
-                        (s) => string.IsNullOrEmpty(s) ? choices :
-                            choices.Where(c => c.Name.Contains(s)).ToList(),
-                        "",
-                        "Select media to remove");
-
-                    if (selected == null) return;
-
-                    var toRemove = allMatches.First(a => a.name == selected.Name);
-
-                    // Remove from stored description
-                    if (desc.Contains(toRemove.match))
-                    {
-                        desc = desc.Replace(toRemove.match, "").Trim();
-                        game.Description = desc;
-                        _api.Database.Games.Update(game);
-                    }
-
-                    // Remove from cached description
-                    if (hasCached && cachedDesc.Contains(toRemove.match))
-                    {
-                        cachedDesc = cachedDesc.Replace(toRemove.match, "").Trim();
-                        // Rewrite cache
-                        _steamService.ClearCachedDescription(game.Id);
-                        if (!string.IsNullOrEmpty(cachedDesc))
-                        {
-                            // Re-save the cleaned cache
-                            var cacheTask = _steamService.GetRichDescriptionAsync(game);
-                            // Force re-cache by clearing and saving
-                        }
-                    }
-
-                    // Also delete the local file if it exists
-                    var gameDir = System.IO.Path.Combine(
-                        GetPluginUserDataPath(), Common.Constants.GamesCacheFolder, game.Id.ToString());
-                    var filePath = System.IO.Path.Combine(gameDir, toRemove.name);
-                    if (System.IO.File.Exists(filePath))
-                        try { System.IO.File.Delete(filePath); } catch { }
-
-                    _api.Dialogs.ShowMessage($"Removed: {toRemove.name}", Constants.PluginName);
-
-                    if (_lastSelectedGame?.Id == game.Id)
-                        TryInjectAndRender(game);
-                }
-            });
-
-            items.Add(new GameMenuItem
-            {
-                MenuSection = Constants.MenuSectionName,
-                Description = "Re-download media",
-                Action = (menuArgs) =>
-                {
-                    if (_cacheService == null) return;
-                    foreach (var game in menuArgs.Games)
-                    {
-                        _cacheService.ClearGameCache(game.Id);
-                        _steamService?.ClearCachedDescription(game.Id);
-                    }
-                    if (_renderer?.IsInitialized == true && _lastSelectedGame != null)
-                        TryInjectAndRender(_lastSelectedGame);
-                    _api.Dialogs.ShowMessage(
-                        "Cache cleared. Media will re-download as you browse.",
-                        Constants.PluginName);
-                }
-            });
-
-            // Video scale submenu
-            foreach (var pct in new[] { 75, 50, 25 })
-            {
-                var scale = pct;
-                items.Add(new GameMenuItem
-                {
-                    MenuSection = Constants.MenuSectionName + "|Video scale",
-                    Description = $"{scale}%",
-                    Action = (menuArgs) =>
-                    {
-                        foreach (var game in menuArgs.Games)
-                            _cacheService?.SetGameVideoScale(game.Id, scale);
-                        if (_renderer?.IsInitialized == true)
-                            _ = _renderer.WebViewControl.CoreWebView2.ExecuteScriptAsync(
-                                $"setVideoScale({scale})");
-                    }
-                });
-            }
-
-            items.Add(new GameMenuItem
-            {
-                MenuSection = Constants.MenuSectionName + "|Video scale",
-                Description = "Reset to default",
-                Action = (menuArgs) =>
-                {
-                    foreach (var game in menuArgs.Games)
-                        _cacheService?.SetGameVideoScale(game.Id, null);
-                    if (_renderer?.IsInitialized == true)
-                        _ = _renderer.WebViewControl.CoreWebView2.ExecuteScriptAsync(
-                            $"setVideoScale({Settings.VideoScale})");
                 }
             });
 

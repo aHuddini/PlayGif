@@ -1,8 +1,14 @@
 AddonId: 'PlayGif.2e196d25-24d1-4db3-b732-9766c994a496'
 Packages:
-  - Version: 0.1.0
+  - Version: 1.0.0
     RequiredApiVersion: 6.16.0
-    ReleaseDate: 2026-04-11
-    PackageUrl: 'https://github.com/aHuddini/PlayGif/releases/download/0.1.0/PlayGif-0_1_0.pext'
+    ReleaseDate: 2026-07-25
+    PackageUrl: 'https://github.com/aHuddini/PlayGif/releases/download/1.0.0/PlayGif-1_0_0.pext'
     Changelog:
-      - '[New Feature] Initial release.'
+      - '[New Feature] Animated game descriptions: Steam store trailers, GIFs, animated WebP and AVIF play inline instead of showing as static text.'
+      - '[New Feature] Fetch rich descriptions from Steam or GOG for any game, individually or in bulk for your whole library.'
+      - '[New Feature] Add your own media to any description - from a local file, a URL, or a built-in web image search.'
+      - '[New Feature] Per-game video scale (25/50/75%), plus a global scale and max-height limit.'
+      - '[Performance] Videos play as H.264 MP4 wherever available, which is hardware-decoded far more widely than VP9 - smoother playback and roughly half the disk use.'
+      - '[Performance] Media caching for offline viewing, with a configurable per-game size limit.'
+      - '[Improved] Playback pauses automatically while a game is running or when Playnite loses focus.'

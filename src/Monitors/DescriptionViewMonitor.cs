@@ -24,6 +24,10 @@ namespace PlayGif.Monitors
         public bool IsInjected => _hiddenHtmlTextView != null;
         public ScrollViewer ParentScrollViewer => _parentScrollViewer;
 
+        // Content changes don't always resize the WebView, so the clip region can
+        // keep an outdated rectangle and hide part of the description
+        public void RefreshClip() => _clipper?.UpdateClipRegion();
+
         public void ResetSearchState()
         {
             _loggedMissing = false;
@@ -159,6 +163,7 @@ namespace PlayGif.Monitors
         {
             _clipper?.Detach();
             _clipper = null;
+
 
             var webView = _webViewProvider();
 

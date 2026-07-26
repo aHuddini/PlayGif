@@ -1,0 +1,99 @@
+name: Bug Report
+description: Create an issue to report a bug
+title: "[BUG] "
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: view-mode
+    attributes:
+      label: View Mode
+      description: Is this bug occurring on Playnite Desktop, Fullscreen, or both?
+      options:
+        - Desktop
+        - Fullscreen
+        - Both
+    validations:
+      required: true
+
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: Describe the bug
+      description: A description of what the bug is.
+      placeholder: Tell us what happened...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you do right before the problem appeared?
+      placeholder: |
+        1. Select a game with a Steam description
+        2. Scroll down the description
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen instead.
+    validations:
+      required: true
+
+  - type: input
+    id: game
+    attributes:
+      label: Affected game (if specific)
+      description: If the issue only happens on certain games, name one — description content varies a lot between store pages.
+      placeholder: e.g., Hades (Steam)
+    validations:
+      required: false
+
+  - type: textarea
+    id: theme
+    attributes:
+      label: Playnite theme
+      description: Which theme are you using? Description rendering is injected into the theme's layout, so this matters.
+      placeholder: e.g., Harmony, Default Desktop, Aniki ReMake
+    validations:
+      required: false
+
+  - type: textarea
+    id: plugin-conflicts
+    attributes:
+      label: Conflicts with other extensions (if any)
+      description: Describe issues that only appear when another extension is active (don't assume the developer knows what it does).
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or video
+      description: Visual bugs (clipped text, blank areas, broken images) are much easier to fix with a screenshot.
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Windows version, Playnite version, and PlayGif version.
+      placeholder: |
+        Windows: 11 23H2
+        Playnite: 10.36
+        PlayGif: 1.0.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log file
+      description: Attach `extension.log` from your Playnite data folder if possible.
+    validations:
+      required: false

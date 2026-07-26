@@ -22,7 +22,8 @@
         overscroll-behavior: none;
     }
     #content {
-        padding: 0 8px 0 0;
+        /* bottom padding keeps the final line clear of the clip edge */
+        padding: 0 8px 4px 0;
     }
     #content img {
         max-width: 100%;
@@ -92,9 +93,12 @@
             var v = videos[i];
             v.muted = true;
             v.playsInline = true;
-            v.preload = 'metadata';
+            v.preload = 'none';
             v.removeAttribute('loop');
             v.removeAttribute('autoplay');
+            v.removeAttribute('crossorigin');
+            v.removeAttribute('width');
+            v.removeAttribute('height');
             v.onended = function() {
                 this.currentTime = 0;
                 this.play().catch(function(){});
@@ -102,7 +106,7 @@
         }
         // Immediately play the first video so the page isn't blank
         if (videos.length > 0 && !_posterOnly) {
-            videos[0].autoplay = true;
+            videos[0].preload = 'auto';
             videos[0].play().catch(function(){});
         }
 
@@ -163,14 +167,53 @@
         setupVideoObserver();
     }
 
+    // scrollHeight ignores the last child's bottom margin, which clips the final
+    // line. getBoundingClientRect covers the real painted box.
+    function measureHeight() {
+        var el = document.getElementById('content');
+        var h = el.scrollHeight;
+
+        var rect = el.getBoundingClientRect();
+        if (rect.height > h) h = rect.height;
+
+        // Walk the last few children in case one overflows its parent
+        var kids = el.children;
+        for (var i = Math.max(0, kids.length - 5); i < kids.length; i++) {
+            var kr = kids[i].getBoundingClientRect();
+            var bottom = kr.bottom - rect.top;
+            var margin = parseFloat(getComputedStyle(kids[i]).marginBottom) || 0;
+            if (bottom + margin > h) h = bottom + margin;
+        }
+
+        return Math.ceil(h) + 4; // small guard against sub-pixel rounding
+    }
+
+    var _lastHeight = 0;
+
     function reportHeight() {
-        var height = Math.ceil(document.getElementById('content').scrollHeight);
+        var height = measureHeight();
+        if (height === _lastHeight) return;
+        _lastHeight = height;
         window.chrome.webview.postMessage(JSON.stringify({ type: 'height', value: height }));
     }
 
     new MutationObserver(function() {
         setTimeout(reportHeight, 200);
     }).observe(document.getElementById('content'), { childList: true, subtree: true });
+
+    // Re-measure whenever layout actually changes — catches late font loading and
+    // reflow past the timer ladder, which is the no-media case that clipped text
+    if (window.ResizeObserver) {
+        new ResizeObserver(function() { reportHeight(); })
+            .observe(document.getElementById('content'));
+    }
+
+    // Web fonts change text metrics after first paint
+    if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(function() { reportHeight(); });
+    }
+
+    window.addEventListener('load', reportHeight);
 
     // Forward ALL wheel events to WPF — no internal scrolling
     window.addEventListener('wheel', function(e) {

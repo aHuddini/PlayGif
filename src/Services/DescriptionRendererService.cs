@@ -43,7 +43,10 @@ namespace PlayGif.Services
                 var userDataFolder = Path.Combine(_cacheBasePathProvider(), "WebView2Data");
                 Directory.CreateDirectory(userDataFolder);
                 var options = new CoreWebView2EnvironmentOptions(
-                    "--disable-threaded-scrolling");
+                    "--disable-threaded-scrolling " +
+                    "--enable-gpu-rasterization " +
+                    "--enable-accelerated-video-decode " +
+                    "--ignore-gpu-blocklist");
                 _environment = await CoreWebView2Environment.CreateAsync(null, userDataFolder, options);
                 Logger.Info("WebView2 environment created.");
             }

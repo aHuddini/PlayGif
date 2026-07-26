@@ -21,7 +21,7 @@
 
     <ItemGroup>
         <PackageReference Include="PlayniteSDK" Version="6.16.0.0" PrivateAssets="none" />
-        <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
         <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3124.44" />
         <PackageReference Include="HtmlAgilityPack" Version="1.11.72" />
         <PackageReference Include="System.ValueTuple" Version="4.5.0" />

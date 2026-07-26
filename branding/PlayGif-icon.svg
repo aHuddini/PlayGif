@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- PlayGif icon. Golden-ratio construction on a 256 canvas:
+       screen 224 wide / 138.4 tall (224 ÷ φ), centred at y=58.8.
+       The sword doubles as the motion line — one stroke, two meanings. -->
+  <defs>
+    <!-- Blue gradient: deep indigo -> cyan, travelling with the sword's diagonal -->
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <!-- Glassmorphic screen fill -->
+    <linearGradient id="glass" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#60A5FA" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#0EA5E9" stop-opacity="0.06"/>
+    </linearGradient>
+    <linearGradient id="blade" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#DBEAFE"/>
+      <stop offset="0.55" stop-color="#93C5FD"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Layer 1: tv — monitor shell, glass screen, stand -->
+  <g id="tv">
+    <rect x="16" y="30" width="224" height="138" rx="20" fill="#0B1220" stroke="url(#acc)" stroke-width="9"/>
+    <rect x="27" y="41" width="202" height="116" rx="12" fill="url(#glass)"/>
+    <!-- glass sheen across the top third -->
+    <path d="M 27 53 Q 128 96 229 53 L 229 41 Q 229 41 217 41 L 39 41 Q 27 41 27 53 Z" fill="#E0F2FE" fill-opacity="0.10"/>
+    <rect x="118" y="168" width="20" height="20" fill="url(#acc)"/>
+    <rect x="74" y="188" width="108" height="12" rx="6" fill="url(#acc)"/>
+  </g>
+
+  <!-- Layer 2: motion — speed lines trailing the hilt, parallel to the blade so
+       they read as travel rather than clutter -->
+  <g id="motion" stroke="url(#acc)" stroke-linecap="round" fill="none">
+    <path d="M 46 150 L 74 122" stroke-width="9" stroke-opacity="0.80"/>
+    <path d="M 44 118 L 66 96"  stroke-width="7" stroke-opacity="0.50"/>
+    <path d="M 74 172 L 96 150" stroke-width="7" stroke-opacity="0.35"/>
+  </g>
+
+  <!-- Layer 3: sword — blade along the 45° golden diagonal from hilt (100,152)
+       to tip (188,64). Widest at the guard, converging to a point: the taper is
+       what separates a blade from a brush at small sizes. -->
+  <g id="sword">
+    <!-- blade body: guard-width 22, shoulder near the tip, then a point -->
+    <path d="M 108 160 L 174 86 L 188 64 L 166 78 L 92 144 Z" fill="url(#blade)"/>
+    <!-- fuller: a thin dark groove down the blade's centre line -->
+    <path d="M 100 152 L 172 80 L 176 84 L 104 156 Z" fill="#0B1220" fill-opacity="0.20"/>
+    <!-- tip glint -->
+    <path d="M 188 64 L 174 86 L 179 90 L 188 64 Z" fill="#F0F9FF" fill-opacity="0.9"/>
+    <!-- crossguard: a flat bar perpendicular to the blade. Butt caps, not round —
+         a rounded cap at this weight reads as a chevron. -->
+    <path d="M 118 170 L 82 134" stroke="url(#acc)" stroke-width="13" stroke-linecap="butt"/>
+    <!-- grip + pommel, continuing down the blade axis -->
+    <path d="M 96 156 L 84 168" stroke="url(#acc)" stroke-width="11" stroke-linecap="round"/>
+    <circle cx="80" cy="172" r="8" fill="url(#acc)"/>
+  </g>
+
+  <!-- Layer 4: stars — sparkle particles thrown off the blade -->
+  <g id="stars" fill="#E0F2FE">
+    <path d="M 196 48 L 200 58 L 210 62 L 200 66 L 196 76 L 192 66 L 182 62 L 192 58 Z" fill-opacity="0.95"/>
+    <path d="M 152 92 L 154.5 98.5 L 161 101 L 154.5 103.5 L 152 110 L 149.5 103.5 L 143 101 L 149.5 98.5 Z" fill-opacity="0.75"/>
+    <path d="M 206 106 L 208 111 L 213 113 L 208 115 L 206 120 L 204 115 L 199 113 L 204 111 Z" fill-opacity="0.6"/>
+  </g>
+</svg>

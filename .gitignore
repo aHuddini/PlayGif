@@ -15,8 +15,12 @@ src/obj/
 packages/
 *.nupkg
 
-# Package output
-pext/*.pext
+# Package / release output
+package/
+pext/
+release/
+*.pext
+*.zip
 
 # OS
 Thumbs.db
@@ -27,6 +31,15 @@ desktop.ini
 *.tmp
 *.bak
 *.swp
+nul
 
-# Superpowers brainstorm sessions
+# AI assistant context — local only, not part of the distributed source
+.claude/
+CLAUDE.md
 .superpowers/
+.remember/
+docs/plans/
+docs/superpowers/
+
+# Internal implementation notes - kept local
+docs/dev_docs/

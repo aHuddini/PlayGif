@@ -1,11 +1,11 @@
 Id: PlayGif.2e196d25-24d1-4db3-b732-9766c994a496
 Name: PlayGif
 Author: Huddini
-Version: 0.1.0
+Version: 1.0.0
 Module: PlayGif.dll
 Type: GenericPlugin
 Icon: icon.png
-Description: A Playnite extension for displaying animated GIFs.
+Description: Brings game descriptions to life. Replaces Playnite's static description view with an animated renderer, so Steam store trailers, GIFs, and animated art play inline.
 Links:
   - Name: GitHub Repository
     Url: https://github.com/aHuddini/PlayGif

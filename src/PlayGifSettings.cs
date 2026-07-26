@@ -56,6 +56,13 @@ namespace PlayGif
             set { videoScale = value; OnPropertyChanged(nameof(VideoScale)); }
         }
 
+        private string ffmpegPath = "";
+        public string FfmpegPath
+        {
+            get => ffmpegPath;
+            set { ffmpegPath = value; OnPropertyChanged(nameof(FfmpegPath)); }
+        }
+
         private bool enableDebugMode = false;
         public bool EnableDebugMode
         {

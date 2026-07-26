@@ -287,7 +287,7 @@ namespace PlayGif.Services
             return null;
         }
 
-        private void SaveCachedDescription(Guid gameId, string html)
+        public void SaveCachedDescription(Guid gameId, string html)
         {
             var path = GetDescriptionCachePath(gameId);
             var dir = Path.GetDirectoryName(path);
