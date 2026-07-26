@@ -41,6 +41,10 @@ namespace PlayGif.Common
         public static readonly string[] AlternateDescriptionNames =
             { "DescriptionText", "PART_Description" };
 
+        // Video scale choices, shared by the settings dropdown and the per-game
+        // menu so the two can't drift apart. The shell clamps to 10-100.
+        public static readonly int[] VideoScaleSteps = { 100, 90, 75, 50, 35, 25 };
+
         // Verbose injection logging. Grid view always has two description
         // candidates, so this fires on normal browsing — keep it behind debug
         // mode rather than filling the shared extension.log for every user.

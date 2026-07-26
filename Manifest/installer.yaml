@@ -7,6 +7,7 @@ Packages:
     Changelog:
       - '[Critical Fix] Descriptions stopped animating after switching between Grid and Details view. The renderer now re-attaches to whichever view is on screen instead of staying with the first one it found.'
       - '[Critical Fix] In Grid view the renderer could attach to the hidden Details panel, leaving the visible description static. It now asks Playnite which view is active rather than guessing.'
+      - '[New Feature] Video scale is now a dropdown (100/90/75/50/35/25%). Lowering it decodes fewer pixels, which helps on slower machines.'
       - '[New Feature] Theme Support settings tab with a one-click layout report for diagnosing theme compatibility problems.'
       - '[Improved] Added "Open debug log folder" so the log is easy to find when reporting an issue.'
   - Version: 1.0.0

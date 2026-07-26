@@ -10,6 +10,8 @@ All notable changes to PlayGif will be documented in this file.
   - `IsVisible` is not usable for this: themes that wrap the description in a collapsed `Expander` (Harmony, Stardust) make every candidate report `IsVisible=false`, including the one actually on screen. Laid-out size is the fallback.
 
 ### Added
+- **Video scale is a dropdown.** 100 / 90 / 75 / 50 / 35 / 25%, defaulting to 100%. Lowering it decodes fewer pixels per frame, which is the cheapest way to cut playback cost on slower hardware. Previously a free-text box that accepted values the shell silently clamped away. Saved values that don't match an option snap to the nearest one. The per-game menu now draws from the same `Constants.VideoScaleSteps` list so the two can't drift apart.
+
 - **Theme Support settings tab.** Runs a layout report describing what PlayGif found in the theme's visual tree, reports whether the renderer is attached and which view is active, and links to the log folder. Per-theme compatibility patches will live here if a theme ever needs one.
 - **Open debug log folder** menu item and settings button, which selects `extension.log` in Explorer.
 

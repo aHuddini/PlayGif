@@ -33,6 +33,7 @@ https://github.com/user-attachments/assets/90acd659-e195-446f-aeab-e5349ae84fd7
 - **Grid view animates properly.** In Grid view the description could stay static while the animated version rendered out of sight.
 
 ### Added
+- **Video scale dropdown** (100/90/75/50/35/25%). Lowering it is the simplest way to reduce playback cost on slower machines.
 - **Theme Support settings tab.** If descriptions do not animate correctly in your theme, run the layout report and attach it to a bug report.
 - **Open debug log folder** — finds `extension.log` for you.
 

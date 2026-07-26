@@ -855,8 +855,9 @@ namespace PlayGif
         {
             var items = new List<GameMenuItem>();
 
-            // Video scale — first in menu
-            foreach (var pct in new[] { 75, 50, 25 })
+            // Video scale — first in menu. 100% is the "Reset to default" case,
+            // so it is not offered as an explicit override here.
+            foreach (var pct in Constants.VideoScaleSteps.Where(p => p < 100))
             {
                 var scale = pct;
                 items.Add(new GameMenuItem
