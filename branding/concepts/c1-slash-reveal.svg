@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- C1 "Slash reveal" - symbolic icon / dual-read.
+       The sword's cut is the diagonal boundary itself: static text lines on one
+       side, motion on the other. The blade sits ON that boundary, so nothing
+       floats. Level-3 abstraction of "sword" - the slash, not the object. -->
+  <defs>
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3B82F6"/><stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#60A5FA" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#0EA5E9" stop-opacity="0.05"/>
+    </linearGradient>
+    <clipPath id="scr"><rect x="27" y="41" width="202" height="116" rx="12"/></clipPath>
+    <!-- everything left of the cut -->
+    <clipPath id="beforeCut"><path d="M 27 41 L 210 41 L 60 157 L 27 157 Z"/></clipPath>
+    <!-- everything right of the cut -->
+    <clipPath id="afterCut"><path d="M 210 41 L 229 41 L 229 157 L 60 157 Z"/></clipPath>
+  </defs>
+
+  <rect x="16" y="30" width="224" height="138" rx="20" fill="#0B1220" stroke="url(#acc)" stroke-width="9"/>
+  <rect x="27" y="41" width="202" height="116" rx="12" fill="url(#glass)"/>
+
+  <g clip-path="url(#scr)">
+    <!-- BEFORE: flat description text lines, muted -->
+    <g clip-path="url(#beforeCut)" fill="#64748B" fill-opacity="0.75">
+      <rect x="44" y="62" width="86" height="9" rx="4.5"/>
+      <rect x="44" y="82" width="110" height="9" rx="4.5"/>
+      <rect x="44" y="102" width="72" height="9" rx="4.5"/>
+      <rect x="44" y="122" width="96" height="9" rx="4.5"/>
+    </g>
+    <!-- AFTER: the same lines become live motion streaks -->
+    <g clip-path="url(#afterCut)" fill="url(#acc)">
+      <rect x="44" y="62" width="150" height="9" rx="4.5"/>
+      <rect x="44" y="82" width="150" height="9" rx="4.5"/>
+      <rect x="44" y="102" width="150" height="9" rx="4.5"/>
+      <rect x="44" y="122" width="150" height="9" rx="4.5"/>
+    </g>
+    <!-- the cut itself: a bright edge -->
+    <path d="M 213 38 L 57 160" stroke="#F0F9FF" stroke-width="7" stroke-linecap="round"/>
+    <path d="M 213 38 L 57 160" stroke="url(#acc)" stroke-width="3" stroke-linecap="round"/>
+  </g>
+
+  <!-- spark where the cut exits -->
+  <path d="M 210 34 L 214 45 L 225 49 L 214 53 L 210 64 L 206 53 L 195 49 L 206 45 Z"
+        fill="#E0F2FE" fill-opacity="0.95"/>
+
+  <rect x="118" y="168" width="20" height="20" fill="url(#acc)"/>
+  <rect x="74" y="188" width="108" height="12" rx="6" fill="url(#acc)"/>
+</svg>

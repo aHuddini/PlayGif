@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- C2 "Play-sword" - letterform+metaphor / dual-read.
+       The play triangle IS the sword: its leading edge is a blade, with a
+       crossguard and pommel at the base. One shape carries both meanings,
+       so there is nothing to "stitch" - the classic FedEx-arrow approach. -->
+  <defs>
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3B82F6"/><stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#60A5FA" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#0EA5E9" stop-opacity="0.05"/>
+    </linearGradient>
+    <linearGradient id="steel" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#93C5FD"/><stop offset="1" stop-color="#F0F9FF"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="16" y="30" width="224" height="138" rx="20" fill="#0B1220" stroke="url(#acc)" stroke-width="9"/>
+  <rect x="27" y="41" width="202" height="116" rx="12" fill="url(#glass)"/>
+  <path d="M 27 53 Q 128 96 229 53 L 229 41 Q 229 41 217 41 L 39 41 Q 27 41 27 53 Z" fill="#E0F2FE" fill-opacity="0.09"/>
+
+  <!-- play triangle whose upper edge sharpens into a blade point -->
+  <g>
+    <path d="M 96 62 L 186 99 L 96 136 Z" fill="url(#steel)"/>
+    <!-- fuller running down the blade edge -->
+    <path d="M 104 72 L 170 99 L 104 100 Z" fill="#0B1220" fill-opacity="0.10"/>
+    <!-- crossguard across the triangle's base -->
+    <rect x="84" y="52" width="14" height="94" rx="7" fill="url(#acc)"/>
+    <!-- grip + pommel -->
+    <rect x="66" y="92" width="20" height="14" rx="7" fill="url(#acc)"/>
+    <circle cx="60" cy="99" r="10" fill="url(#acc)"/>
+  </g>
+
+  <!-- sparks off the point -->
+  <path d="M 200 74 L 203 83 L 212 86 L 203 89 L 200 98 L 197 89 L 188 86 L 197 83 Z"
+        fill="#E0F2FE" fill-opacity="0.9"/>
+  <path d="M 196 118 L 198 123 L 203 125 L 198 127 L 196 132 L 194 127 L 189 125 L 194 123 Z"
+        fill="#E0F2FE" fill-opacity="0.55"/>
+
+  <rect x="118" y="168" width="20" height="20" fill="url(#acc)"/>
+  <rect x="74" y="188" width="108" height="12" rx="6" fill="url(#acc)"/>
+</svg>

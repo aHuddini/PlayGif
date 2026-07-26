@@ -19,9 +19,9 @@
     <!-- everything right of the cut: the "after" state -->
     <clipPath id="afterCut"><path d="M 210 41 L 229 41 L 229 157 L 60 157 Z"/></clipPath>
   </defs>
-  <g id="tv">
-    <rect x="16" y="30" width="224" height="138" rx="20" fill="#0B1220" stroke="url(#acc)" stroke-width="9"/>
-    <rect x="27" y="41" width="202" height="116" rx="12" fill="url(#glass)"/>
+  <g id="stand">
+    <rect x="118" y="168" width="20" height="20" fill="url(#acc)"/>
+    <rect x="74" y="188" width="108" height="12" rx="6" fill="url(#acc)"/>
   </g>
 </svg>
 

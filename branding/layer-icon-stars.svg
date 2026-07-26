@@ -1,28 +1,26 @@
 ﻿<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <!-- PlayGif icon. Golden-ratio construction on a 256 canvas:
-       screen 224 wide / 138.4 tall (224 Ã· Ï†), centred at y=58.8.
-       The sword doubles as the motion line â€” one stroke, two meanings. -->
+  <!-- PlayGif icon - "slash reveal".
+       The sword's cut IS the diagonal boundary: muted static text lines on one
+       side, live animated bars on the other. The blade isn't decoration sitting
+       on a screen - it's the transformation the plugin performs. Sparks trail
+       the cut, densest where it exits the frame.
+       Golden ratio: screen 224 wide x 138 tall (224 / phi). -->
   <defs>
-    <!-- Blue gradient: deep indigo -> cyan, travelling with the sword's diagonal -->
     <linearGradient id="acc" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#3B82F6"/>
-      <stop offset="1" stop-color="#22D3EE"/>
+      <stop offset="0" stop-color="#3B82F6"/><stop offset="1" stop-color="#22D3EE"/>
     </linearGradient>
-    <!-- Glassmorphic screen fill -->
     <linearGradient id="glass" x1="0" y1="0" x2="0.6" y2="1">
-      <stop offset="0" stop-color="#60A5FA" stop-opacity="0.22"/>
-      <stop offset="1" stop-color="#0EA5E9" stop-opacity="0.06"/>
+      <stop offset="0" stop-color="#60A5FA" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#0EA5E9" stop-opacity="0.05"/>
     </linearGradient>
-    <linearGradient id="blade" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0" stop-color="#DBEAFE"/>
-      <stop offset="0.55" stop-color="#93C5FD"/>
-      <stop offset="1" stop-color="#22D3EE"/>
-    </linearGradient>
+    <clipPath id="scr"><rect x="27" y="41" width="202" height="116" rx="12"/></clipPath>
+    <!-- everything left of the cut: the "before" state -->
+    <clipPath id="beforeCut"><path d="M 27 41 L 210 41 L 60 157 L 27 157 Z"/></clipPath>
+    <!-- everything right of the cut: the "after" state -->
+    <clipPath id="afterCut"><path d="M 210 41 L 229 41 L 229 157 L 60 157 Z"/></clipPath>
   </defs>
   <g id="stars" fill="#E0F2FE">
-    <path d="M 196 48 L 200 58 L 210 62 L 200 66 L 196 76 L 192 66 L 182 62 L 192 58 Z" fill-opacity="0.95"/>
-    <path d="M 152 92 L 154.5 98.5 L 161 101 L 154.5 103.5 L 152 110 L 149.5 103.5 L 143 101 L 149.5 98.5 Z" fill-opacity="0.75"/>
-    <path d="M 206 106 L 208 111 L 213 113 L 208 115 L 206 120 L 204 115 L 199 113 L 204 111 Z" fill-opacity="0.6"/>
+    <path d="M 213 27.0 L 216.7 34.3 L 224.0 38 L 216.7 41.7 L 213 49.0 L 209.3 41.7 L 202.0 38 L 209.3 34.3 Z" fill-opacity="0.95"/>
   </g>
 </svg>
 

@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- C4 "Blade + play, stacked" - symbolic icon, kept literal but composed.
+       Closest to the original brief: a real sword, a real play mark, real
+       sparkles. Cohesion comes from a shared 45-degree grid and from the
+       trail being a hard-edged wedge that STARTS at the guard - no floating
+       strokes, no curve fighting the blade. -->
+  <defs>
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3B82F6"/><stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#60A5FA" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#0EA5E9" stop-opacity="0.05"/>
+    </linearGradient>
+    <linearGradient id="steel" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#93C5FD"/><stop offset="0.5" stop-color="#DBEAFE"/>
+      <stop offset="1" stop-color="#F0F9FF"/>
+    </linearGradient>
+    <!-- wedge fades out away from the blade -->
+    <linearGradient id="wake" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7DD3FC" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#22D3EE" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="scr"><rect x="27" y="41" width="202" height="116" rx="12"/></clipPath>
+  </defs>
+
+  <rect x="16" y="30" width="224" height="138" rx="20" fill="#0B1220" stroke="url(#acc)" stroke-width="9"/>
+  <rect x="27" y="41" width="202" height="116" rx="12" fill="url(#glass)"/>
+  <path d="M 27 53 Q 128 96 229 53 L 229 41 Q 229 41 217 41 L 39 41 Q 27 41 27 53 Z" fill="#E0F2FE" fill-opacity="0.09"/>
+
+  <g clip-path="url(#scr)">
+    <!-- wake: a solid wedge sharing the blade's exact 45deg axis, widest at
+         the guard and vanishing up-left. Attached, not floating. -->
+    <path d="M 118 128 L 134 144 L 40 158 Z" fill="url(#wake)"/>
+    <path d="M 118 128 L 40 110 L 44 128 Z" fill="url(#wake)" fill-opacity="0.5"/>
+
+    <!-- sword on the 45deg diagonal -->
+    <path d="M 130 130 L 122 122 L 190 62 L 198 70 Z" fill="url(#steel)"/>
+    <path d="M 128 125 L 188 68 L 191 71 L 131 128 Z" fill="#0B1220" fill-opacity="0.14"/>
+    <path d="M 139 135 L 113 109" stroke="url(#acc)" stroke-width="13" stroke-linecap="butt"/>
+    <path d="M 124 130 L 114 140" stroke="url(#acc)" stroke-width="10" stroke-linecap="round"/>
+    <circle cx="110" cy="144" r="7.5" fill="url(#acc)"/>
+  </g>
+
+  <!-- sparks along the blade axis, brightest at the point -->
+  <path d="M 206 52 L 209 61 L 218 64 L 209 67 L 206 76 L 203 67 L 194 64 L 203 61 Z"
+        fill="#E0F2FE" fill-opacity="0.95"/>
+  <path d="M 170 84 L 172 89 L 177 91 L 172 93 L 170 98 L 168 93 L 163 91 L 168 89 Z"
+        fill="#E0F2FE" fill-opacity="0.6"/>
+
+  <rect x="118" y="168" width="20" height="20" fill="url(#acc)"/>
+  <rect x="74" y="188" width="108" height="12" rx="6" fill="url(#acc)"/>
+</svg>

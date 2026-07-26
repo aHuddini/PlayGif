@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- C5 "G-play monogram" - typographic / letterform+metaphor.
+       The G of Gif opens into a play triangle, with the counter's gap acting
+       as the motion cue. Single bold silhouette: the most robust option at
+       16px, and the only one in the set that is text-driven. -->
+  <defs>
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3B82F6"/><stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#60A5FA" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#0EA5E9" stop-opacity="0.05"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="16" y="30" width="224" height="138" rx="20" fill="#0B1220" stroke="url(#acc)" stroke-width="9"/>
+  <rect x="27" y="41" width="202" height="116" rx="12" fill="url(#glass)"/>
+  <path d="M 27 53 Q 128 96 229 53 L 229 41 Q 229 41 217 41 L 39 41 Q 27 41 27 53 Z" fill="#E0F2FE" fill-opacity="0.09"/>
+
+  <!-- G: an open ring, gap on the right where the play mark sits -->
+  <path d="M 152 72 A 40 40 0 1 0 152 126" fill="none" stroke="url(#acc)"
+        stroke-width="15" stroke-linecap="round"/>
+  <!-- G's crossbar -->
+  <rect x="122" y="92" width="34" height="14" rx="7" fill="url(#acc)"/>
+  <!-- play triangle completing the letter -->
+  <path d="M 150 74 L 190 99 L 150 124 Z" fill="#F0F9FF"/>
+
+  <!-- motion ticks trailing the ring, on its tangent -->
+  <g stroke="url(#acc)" stroke-linecap="round" fill="none" stroke-opacity="0.55">
+    <path d="M 44 86 L 58 86" stroke-width="7"/>
+    <path d="M 40 112 L 54 112" stroke-width="5"/>
+  </g>
+
+  <rect x="118" y="168" width="20" height="20" fill="url(#acc)"/>
+  <rect x="74" y="188" width="108" height="12" rx="6" fill="url(#acc)"/>
+</svg>

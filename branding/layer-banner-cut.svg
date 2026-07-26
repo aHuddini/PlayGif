@@ -26,12 +26,9 @@
     <clipPath id="bBefore"><path d="M 49 71 L 192 71 L 75 162 L 49 162 Z"/></clipPath>
     <clipPath id="bAfter"><path d="M 192 71 L 207 71 L 207 162 L 75 162 Z"/></clipPath>
   </defs>
-  <g id="tv">
-    <rect x="40" y="62" width="176" height="109" rx="16" fill="#0B1220" stroke="url(#acc)" stroke-width="7"/>
-    <rect x="49" y="71" width="158" height="91" rx="10" fill="url(#glass)"/>
-    <path d="M 49 80 Q 128 114 207 80 L 207 71 Q 207 71 198 71 L 58 71 Q 49 71 49 80 Z" fill="#E0F2FE" fill-opacity="0.10"/>
-    <rect x="120" y="171" width="16" height="16" fill="url(#acc)"/>
-    <rect x="86" y="187" width="84" height="10" rx="5" fill="url(#acc)"/>
+  <g id="cut" clip-path="url(#bscreen)">
+    <path d="M 194 69 L 72 164" stroke="#F0F9FF" stroke-width="5.5" stroke-linecap="round"/>
+    <path d="M 194 69 L 72 164" stroke="url(#acc)" stroke-width="2.3" stroke-linecap="round"/>
   </g>
 </svg>
 
