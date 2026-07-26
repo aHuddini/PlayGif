@@ -90,6 +90,25 @@ If descriptions do not render correctly in your theme, open **Settings → PlayG
 
 ---
 
+## Known Issues
+
+**Theme compatibility is the rough edge.** Playnite has no official support for animated descriptions, so PlayGif injects a renderer into whatever description panel your theme happens to build. Themes lay that out very differently, and other extensions modify it too.
+
+What that can look like:
+
+- Visual glitches — clipped text, blank gaps, content in the wrong place, or flicker while scrolling
+- Descriptions that don't animate at all in a particular theme
+- Problems that appear only when another extension is installed, because several also modify the details view (HowLongToBeat, achievements plugins, screenshot viewers, and others)
+
+If you hit any of this, please report it — most of these are fixable once I can see what your theme is doing:
+
+1. **Settings → PlayGif → Theme Support → Run layout report**
+2. Open an [issue](https://github.com/aHuddini/PlayGif/issues) with the report, your theme name, and any other extensions that touch the details view
+
+The long-term fix is official Playnite support for animated content in descriptions, which would remove the need to inject anything. Until then, per-theme patches go in the Theme Support tab as they're identified.
+
+---
+
 ## Licensing and Dependencies
 
 PlayGif is MIT licensed. All third-party dependencies use permissive licenses (MIT or BSD 3-Clause). See [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES) for details.

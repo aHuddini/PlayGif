@@ -41,6 +41,9 @@ namespace PlayGif.Common
         public static readonly string[] AlternateDescriptionNames =
             { "DescriptionText", "PART_Description" };
 
+        public const string ProjectUrl = "https://github.com/aHuddini/PlayGif";
+        public const string IssuesUrl = "https://github.com/aHuddini/PlayGif/issues";
+
         // Video scale choices, shared by the settings dropdown and the per-game
         // menu so the two can't drift apart. The shell clamps to 10-100.
         public static readonly int[] VideoScaleSteps = { 100, 90, 75, 50, 35, 25 };

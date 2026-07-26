@@ -10,6 +10,7 @@ Packages:
       - '[Performance Feature] Video scale is now a dropdown (100/90/75/50/35/25%). Lowering it decodes fewer pixels, which helps on slower machines.'
       - '[New Feature] Theme Support settings tab with a one-click layout report for diagnosing theme compatibility problems.'
       - '[Improved] Added "Open debug log folder" so the log is easy to find when reporting an issue.'
+      - '[Improved] Known Issues documented in the Theme Support tab and the README: theme compatibility is the rough edge, since Playnite has no official support for animated descriptions.'
   - Version: 1.0.0
     RequiredApiVersion: 6.16.0
     ReleaseDate: 2026-07-25

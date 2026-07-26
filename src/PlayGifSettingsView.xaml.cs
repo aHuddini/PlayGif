@@ -32,5 +32,24 @@ namespace PlayGif
         {
             (DataContext as PlayGifSettingsViewModel)?.OpenLogFolder();
         }
+
+        private void ReportIssueButton_Click(object sender, RoutedEventArgs e)
+        {
+            OpenUrl(Common.Constants.IssuesUrl);
+        }
+
+        private void ProjectPageButton_Click(object sender, RoutedEventArgs e)
+        {
+            OpenUrl(Common.Constants.ProjectUrl);
+        }
+
+        private static void OpenUrl(string url)
+        {
+            try { System.Diagnostics.Process.Start(url); }
+            catch (Exception ex)
+            {
+                LogManager.GetLogger().Error(ex, $"Failed to open {url}");
+            }
+        }
     }
 }
