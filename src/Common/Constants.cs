@@ -41,6 +41,11 @@ namespace PlayGif.Common
         public static readonly string[] AlternateDescriptionNames =
             { "DescriptionText", "PART_Description" };
 
+        // Extra logging around visual-tree injection. Themes that nest the
+        // description in a lazily-realized TabItem, or views that declare it
+        // twice, are only diagnosable from a live session.
+        public const bool LogInjectionDiagnostics = true;
+
         #endregion
     }
 }

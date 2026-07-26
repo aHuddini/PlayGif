@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -84,10 +85,25 @@ namespace PlayGif.Monitors
                 if (!_loggedMissing)
                 {
                     _loggedMissing = true;
-                    Logger.Info("Description element not found in visual tree. Dumping named elements...");
-                    DumpNamedElements(root, 0);
+                    Logger.Info("Description element not found in visual tree.");
+                    DumpDiagnostics(root);
                 }
                 return;
+            }
+
+            // More than one view can declare PART_HtmlDescription (Grid view and
+            // Details view both do), so record whether we picked a hidden one.
+            if (Constants.LogInjectionDiagnostics)
+            {
+                var all = new List<FrameworkElement>();
+                FindAllByName(root, Constants.HtmlDescriptionPartName, all);
+                if (all.Count > 1)
+                {
+                    Logger.Info($"Multiple description elements present ({all.Count}); " +
+                                $"chosen one visible={htmlTextView.IsVisible} " +
+                                $"size={htmlTextView.ActualWidth:F0}x{htmlTextView.ActualHeight:F0}");
+                    DumpDiagnostics(root);
+                }
             }
 
             var parent = VisualTreeHelper.GetParent(htmlTextView);
@@ -211,6 +227,107 @@ namespace PlayGif.Monitors
                     return found;
             }
             return null;
+        }
+
+        // Collects every element with the given name, not just the first. Grid view
+        // and Details view both declare PART_HtmlDescription, so more than one can
+        // be live at once.
+        private static void FindAllByName(DependencyObject parent, string name, List<FrameworkElement> results)
+        {
+            if (parent == null) return;
+            int count = VisualTreeHelper.GetChildrenCount(parent);
+            for (int i = 0; i < count; i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is FrameworkElement fe && fe.Name == name)
+                    results.Add(fe);
+                FindAllByName(child, name, results);
+            }
+        }
+
+        // Walks up recording the ancestor chain, so we can tell which view an
+        // element belongs to and whether it sits inside a lazily-realized TabItem.
+        private static string DescribeAncestry(DependencyObject node, int maxDepth = 14)
+        {
+            var parts = new List<string>();
+            var cur = VisualTreeHelper.GetParent(node);
+            int depth = 0;
+            while (cur != null && depth++ < maxDepth)
+            {
+                var n = cur is FrameworkElement f && !string.IsNullOrEmpty(f.Name)
+                    ? $"{cur.GetType().Name}#{f.Name}" : cur.GetType().Name;
+                parts.Add(n);
+                cur = VisualTreeHelper.GetParent(cur);
+            }
+            return string.Join(" < ", parts);
+        }
+
+        // Dumps everything needed to tell the two failure modes apart:
+        //   1. element missing entirely  -> lazy TabItem not yet realized
+        //   2. multiple elements present -> we may be injecting into the hidden one
+        public void DumpDiagnostics(DependencyObject root)
+        {
+            try
+            {
+                Logger.Info("===== PlayGif injection diagnostics =====");
+
+                foreach (var name in new[] { Constants.HtmlDescriptionPartName,
+                                             Constants.DescriptionPanelPartName })
+                {
+                    var hits = new List<FrameworkElement>();
+                    FindAllByName(root, name, hits);
+                    Logger.Info($"[{name}] found {hits.Count}");
+
+                    for (int i = 0; i < hits.Count; i++)
+                    {
+                        var e = hits[i];
+                        var tab = FindAncestor<TabItem>(e);
+                        var tabInfo = tab == null ? "none"
+                            : $"{(string.IsNullOrEmpty(tab.Name) ? "(unnamed)" : tab.Name)} selected={tab.IsSelected}";
+                        Logger.Info(
+                            $"  #{i}: type={e.GetType().Name} visible={e.IsVisible} " +
+                            $"loaded={e.IsLoaded} size={e.ActualWidth:F0}x{e.ActualHeight:F0} " +
+                            $"vis={e.Visibility} tabItem=[{tabInfo}]");
+                        Logger.Info($"       parent={VisualTreeHelper.GetParent(e)?.GetType().Name ?? "null"}");
+                        Logger.Info($"       ancestry={DescribeAncestry(e)}");
+                    }
+                }
+
+                // Which TabControls exist and what is selected in each
+                var tabs = new List<FrameworkElement>();
+                CollectByType<TabControl>(root, tabs);
+                Logger.Info($"[TabControls] found {tabs.Count}");
+                foreach (var t in tabs)
+                {
+                    var tc = (TabControl)t;
+                    Logger.Info($"  items={tc.Items.Count} selectedIndex={tc.SelectedIndex} visible={tc.IsVisible}");
+                }
+
+                Logger.Info($"[state] isInjected={IsInjected} scrollViewer={(_parentScrollViewer == null ? "null" : "set")}");
+
+                // Catches themes that use a description element name we don't know
+                Logger.Info("[named elements] description/detail-like names in tree:");
+                DumpNamedElements(root, 0);
+
+                Logger.Info("===== end diagnostics =====");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Diagnostics dump failed");
+            }
+        }
+
+        private static void CollectByType<T>(DependencyObject parent, List<FrameworkElement> results)
+            where T : FrameworkElement
+        {
+            if (parent == null) return;
+            int count = VisualTreeHelper.GetChildrenCount(parent);
+            for (int i = 0; i < count; i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is T t) results.Add(t);
+                CollectByType<T>(child, results);
+            }
         }
 
         private static void DumpNamedElements(DependencyObject parent, int depth)

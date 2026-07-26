@@ -890,6 +890,23 @@ namespace PlayGif
             items.Add(new GameMenuItem
             {
                 MenuSection = Constants.MenuSectionName,
+                Description = "Dump layout diagnostics",
+                Action = (menuArgs) =>
+                {
+                    // Runs against whatever view is open right now, which is the
+                    // only way to capture Grid-view and tab state accurately.
+                    _viewMonitor?.DumpDiagnostics(Application.Current.MainWindow);
+                    _api.Dialogs.ShowMessage(
+                        "Layout diagnostics written to extension.log.\n\n" +
+                        "Open it from Playnite: Help -> Open application directory,\n" +
+                        "then extension.log in that folder.",
+                        Constants.PluginName);
+                }
+            });
+
+            items.Add(new GameMenuItem
+            {
+                MenuSection = Constants.MenuSectionName,
                 Description = "Preview description",
                 Action = (menuArgs) =>
                 {
