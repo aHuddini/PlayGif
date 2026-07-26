@@ -29,6 +29,7 @@ namespace PlayGif
         private Handlers.MediaLibraryHandler _mediaLibrary;
         private Game _lastSelectedGame;
         private int _injectionAttempts;
+        private bool _rendererEventsHooked;
 
         // Menu handlers are built on first use — the menu can be opened before services initialize
         private Handlers.MediaLibraryHandler MediaLibrary => _mediaLibrary ??
@@ -85,6 +86,24 @@ namespace PlayGif
                 _viewMonitor = new DescriptionViewMonitor(
                     () => _renderer.WebViewControl,
                     () => Settings.EnableAnimatedDescriptions);
+
+                // Switching Grid <-> Details tears down the view we injected into.
+                // Re-inject against whatever is on screen now, without waiting for
+                // the user to select a different game.
+                _viewMonitor.InjectionLost += () =>
+                {
+                    Application.Current.Dispatcher.BeginInvoke(
+                        DispatcherPriority.Loaded,
+                        new Action(() =>
+                        {
+                            if (_lastSelectedGame == null) return;
+                            if (!_viewMonitor.IsStale()) return;
+                            _viewMonitor.Detach();
+                            _injectionAttempts = 0;
+                            TryInjectAndRender(_lastSelectedGame);
+                        }));
+                };
+
                 _viewMonitor.StartMonitoring();
 
                 // Subscribe to window events
@@ -179,6 +198,16 @@ namespace PlayGif
             {
                 if (_renderer?.WebViewControl == null) return;
 
+                // The view we injected into is torn down when the user switches
+                // between Grid and Details, or moves to another tab. Detach so the
+                // WebView can be re-parented into whatever is on screen now.
+                if (_viewMonitor.IsInjected && _viewMonitor.IsStale())
+                {
+                    Logger.Info("Injection target is stale (view changed) — re-injecting.");
+                    _viewMonitor.Detach();
+                    _injectionAttempts = 0;
+                }
+
                 // Step 1: Inject into visual tree if not already done
                 if (!_viewMonitor.IsInjected && _injectionAttempts < 5)
                 {
@@ -197,52 +226,59 @@ namespace PlayGif
                             return;
                         }
 
-                        // Full content height — no internal WebView2 scrolling
-                        // SetWindowRgn clips the HWND, parent ScrollViewer scrolls it
-                        _renderer.HeightReported += (height) =>
+                        // Re-injection reuses the same renderer, so these handlers
+                        // must only ever be wired once
+                        if (!_rendererEventsHooked)
                         {
-                            Application.Current.Dispatcher.BeginInvoke(new Action(() =>
-                            {
-                                _renderer.WebViewControl.Height = height;
-                                // Re-clip after the new height lays out, otherwise the
-                                // HWND region still masks part of the description
-                                Application.Current.Dispatcher.BeginInvoke(
-                                    DispatcherPriority.Loaded,
-                                    new Action(() => _viewMonitor?.RefreshClip()));
-                            }));
-                        };
+                            _rendererEventsHooked = true;
 
-                        // Forward wheel events from WebView2 to parent ScrollViewer
-                        // Batch at render frame rate for smoothness
-                        double _pendingDelta = 0;
-                        bool _renderHooked = false;
+                            // Full content height — no internal WebView2 scrolling
+                            // SetWindowRgn clips the HWND, parent ScrollViewer scrolls it
+                            _renderer.HeightReported += (height) =>
+                            {
+                                Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+                                {
+                                    _renderer.WebViewControl.Height = height;
+                                    // Re-clip after the new height lays out, otherwise the
+                                    // HWND region still masks part of the description
+                                    Application.Current.Dispatcher.BeginInvoke(
+                                        DispatcherPriority.Loaded,
+                                        new Action(() => _viewMonitor?.RefreshClip()));
+                                }));
+                            };
 
-                        _renderer.ScrollOverflow += (delta) =>
-                        {
-                            _pendingDelta += delta;
-                            if (!_renderHooked)
-                            {
-                                _renderHooked = true;
-                                CompositionTarget.Rendering += OnRenderFrame;
-                            }
-                        };
+                            // Forward wheel events from WebView2 to parent ScrollViewer
+                            // Batch at render frame rate for smoothness
+                            double pendingDelta = 0;
+                            bool renderHooked = false;
 
-                        void OnRenderFrame(object s2, EventArgs e2)
-                        {
-                            if (_pendingDelta != 0)
+                            void OnRenderFrame(object s2, EventArgs e2)
                             {
-                                var sv = _viewMonitor.ParentScrollViewer;
-                                if (sv != null)
-                                    sv.ScrollToVerticalOffset(sv.VerticalOffset + _pendingDelta);
-                                _pendingDelta = 0;
+                                if (pendingDelta != 0)
+                                {
+                                    // Resolved per frame so it follows re-injection
+                                    var sv = _viewMonitor.ParentScrollViewer;
+                                    if (sv != null)
+                                        sv.ScrollToVerticalOffset(sv.VerticalOffset + pendingDelta);
+                                    pendingDelta = 0;
+                                }
+                                else
+                                {
+                                    renderHooked = false;
+                                    CompositionTarget.Rendering -= OnRenderFrame;
+                                }
                             }
-                            else
+
+                            _renderer.ScrollOverflow += (delta) =>
                             {
-                                _renderHooked = false;
-                                CompositionTarget.Rendering -= OnRenderFrame;
-                            }
+                                pendingDelta += delta;
+                                if (!renderHooked)
+                                {
+                                    renderHooked = true;
+                                    CompositionTarget.Rendering += OnRenderFrame;
+                                }
+                            };
                         }
-
 
                         Logger.Info("WebView2 fully initialized.");
                     }

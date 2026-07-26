@@ -40,13 +40,35 @@ namespace PlayGif.Monitors
             _isEnabled = isEnabled;
         }
 
+        // Raised when the injected view is torn down (Grid <-> Details switch, tab
+        // change), so the host can re-inject without waiting for a game selection.
+        public event Action InjectionLost;
+
         public void StartMonitoring()
         {
             if (_isHooked) return;
             EventManager.RegisterClassHandler(typeof(Window),
                 FrameworkElement.LoadedEvent,
                 new RoutedEventHandler(OnWindowLoaded));
+
+            // A theme's description element can also appear late — FusionX nests it
+            // in a lazily-realized TabItem — so watch for HtmlTextView loading too.
+            EventManager.RegisterClassHandler(typeof(FrameworkElement),
+                FrameworkElement.UnloadedEvent,
+                new RoutedEventHandler(OnElementUnloaded));
+
             _isHooked = true;
+        }
+
+        private void OnElementUnloaded(object sender, RoutedEventArgs e)
+        {
+            // Only care about the element we are currently injected against
+            if (_hiddenHtmlTextView == null) return;
+            if (!ReferenceEquals(sender, _hiddenHtmlTextView) &&
+                !ReferenceEquals(sender, _injectionTarget)) return;
+
+            Logger.Info("Injected description view unloaded — signalling re-injection.");
+            InjectionLost?.Invoke();
         }
 
         private void OnWindowLoaded(object sender, RoutedEventArgs e)
@@ -61,17 +83,61 @@ namespace PlayGif.Monitors
             TryInject(window, webView);
         }
 
+        // True when the element we injected into is gone from the live visual tree
+        // or no longer visible — happens when the user switches view (Grid <-> Details)
+        // or moves to a different tab, since WPF tears down the old view.
+        public bool IsStale()
+        {
+            if (_hiddenHtmlTextView == null) return false;
+            if (!_hiddenHtmlTextView.IsLoaded) return true;
+            if (PresentationSource.FromVisual(_hiddenHtmlTextView) == null) return true;
+
+            // The panel we injected into may still be loaded but hidden behind
+            // another view; treat a zero-size or collapsed ancestor as stale.
+            var panel = _injectionTarget as FrameworkElement;
+            if (panel != null && panel.IsLoaded &&
+                panel.ActualWidth < 1 && panel.ActualHeight < 1) return true;
+
+            return false;
+        }
+
+        // Detaches the WebView from its current parent so it can be re-injected
+        // into whichever view is now on screen.
+        public void Detach()
+        {
+            var webView = _webViewProvider();
+
+            _clipper?.Detach();
+            _clipper = null;
+
+            if (webView != null)
+            {
+                if (webView.Parent is Panel p) p.Children.Remove(webView);
+                else if (webView.Parent is ContentControl cc && ReferenceEquals(cc.Content, webView)) cc.Content = null;
+                else if (_injectionTarget is ScrollViewer sv && ReferenceEquals(sv.Content, webView)) sv.Content = null;
+            }
+
+            // Restore the theme's own description element in the old view
+            if (_hiddenHtmlTextView != null)
+                _hiddenHtmlTextView.Visibility = Visibility.Visible;
+
+            _hiddenHtmlTextView = null;
+            _injectionTarget = null;
+            _parentScrollViewer = null;
+            _loggedMissing = false;
+        }
+
         public void TryInject(DependencyObject root, WebView2 webView)
         {
             if (webView.Parent != null) return;
 
-            var htmlTextView = FindChildByName(root, Constants.HtmlDescriptionPartName);
+            var htmlTextView = FindVisibleByName(root, Constants.HtmlDescriptionPartName);
 
             if (htmlTextView == null)
             {
                 foreach (var altName in Constants.AlternateDescriptionNames)
                 {
-                    htmlTextView = FindChildByName(root, altName);
+                    htmlTextView = FindVisibleByName(root, altName);
                     if (htmlTextView != null)
                     {
                         Logger.Info($"Found description via alternate name: {altName}");
@@ -227,6 +293,33 @@ namespace PlayGif.Monitors
                     return found;
             }
             return null;
+        }
+
+        // Grid view and Details view both declare PART_HtmlDescription, so the tree
+        // can hold several. Taking the first match injects into whichever the walk
+        // reaches first, which is often the hidden one — pick a rendered element
+        // instead, falling back to the first match if none look visible yet.
+        private static FrameworkElement FindVisibleByName(DependencyObject root, string name)
+        {
+            var hits = new List<FrameworkElement>();
+            FindAllByName(root, name, hits);
+            if (hits.Count == 0) return null;
+            if (hits.Count == 1) return hits[0];
+
+            foreach (var e in hits)
+            {
+                if (e.IsVisible && PresentationSource.FromVisual(e) != null)
+                {
+                    // A parent that has laid out has real dimensions; a hidden
+                    // view's panel is typically zero-sized.
+                    var parent = VisualTreeHelper.GetParent(e) as FrameworkElement;
+                    if (parent == null || parent.ActualWidth > 1 || parent.ActualHeight > 1)
+                        return e;
+                }
+            }
+
+            Logger.Info($"{hits.Count} '{name}' elements found, none visible yet; using the first.");
+            return hits[0];
         }
 
         // Collects every element with the given name, not just the first. Grid view
