@@ -24,6 +24,8 @@ Built with the help of Claude Code
 
 ---
 
+https://github.com/user-attachments/assets/3733e044-13ad-4b5e-a439-b0f39a88ac9c
+
 ## What's New - v1.0.0
 
 ### Added
@@ -36,17 +38,7 @@ Built with the help of Claude Code
 - **Videos play as H.264 MP4 wherever available.** Steam serves both VP9 WebM and H.264 MP4; PlayGif now always picks the MP4, which is hardware-decoded far more widely — noticeably smoother playback and roughly half the disk use.
 - **Offline media caching** with a configurable per-game size limit.
 - Playback pauses automatically while a game is running or when Playnite loses focus.
-
----
-
-## Demo
-
-https://github.com/user-attachments/assets/REPLACE_AFTER_UPLOAD
-
-<p align="center">
-  <img src="docs/assets/screenshot-desktop.png" alt="PlayGif rendering an animated Steam description" width="720">
-</p>
-
+  
 ---
 
 ## Features
