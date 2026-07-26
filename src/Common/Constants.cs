@@ -41,10 +41,10 @@ namespace PlayGif.Common
         public static readonly string[] AlternateDescriptionNames =
             { "DescriptionText", "PART_Description" };
 
-        // Extra logging around visual-tree injection. Themes that nest the
-        // description in a lazily-realized TabItem, or views that declare it
-        // twice, are only diagnosable from a live session.
-        public const bool LogInjectionDiagnostics = true;
+        // Verbose injection logging. Grid view always has two description
+        // candidates, so this fires on normal browsing — keep it behind debug
+        // mode rather than filling the shared extension.log for every user.
+        public const bool LogInjectionDiagnostics = false;
 
         #endregion
     }
