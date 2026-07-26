@@ -26,22 +26,25 @@
 
                     <TextBlock Text="Video" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
 
-                    <StackPanel Orientation="Horizontal" Margin="0,5,0,5">
-                        <TextBlock Text="Video scale: " VerticalAlignment="Center" Width="140"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,5,0,4">
+                        <TextBlock Text="Default video scale (all games): " VerticalAlignment="Center" Width="200"/>
                         <ComboBox ItemsSource="{Binding VideoScaleOptions}"
                                   SelectedValue="{Binding Settings.VideoScale}"
                                   SelectedValuePath="Value" DisplayMemberPath="Label"
-                                  Width="150" VerticalAlignment="Center"/>
+                                  Width="170" VerticalAlignment="Center"/>
                     </StackPanel>
-                    <TextBlock Text="Smaller scales decode fewer pixels, which helps on slower machines. Applies to every game unless you set a per-game scale from the game's PlayGif menu."
-                               TextWrapping="Wrap" Opacity="0.5" Margin="0,2,0,8"/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,0,0,3"
+                               Text="Lower scale = less work for your machine. A video at 50% has a quarter of the pixels to decode and draw every frame, so dropping the scale is the most effective way to reduce stutter and CPU/GPU load on slower hardware."/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.5" Margin="0,0,0,10"
+                               Text="This is the global default applied to every game. To override a single game, right-click it and use PlayGif → Video scale."/>
 
-                    <StackPanel Orientation="Horizontal" Margin="0,5,0,5">
-                        <TextBlock Text="Max video height (px): " VerticalAlignment="Center"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,5,0,4">
+                        <TextBlock Text="Max video height (px): " VerticalAlignment="Center" Width="200"/>
                         <TextBox Text="{Binding Settings.MaxVideoHeight, UpdateSourceTrigger=PropertyChanged}"
-                                 Width="50" VerticalAlignment="Center"/>
-                        <TextBlock Text="  (0 = no limit, 360 = 360p, 480 = 480p)" VerticalAlignment="Center" Opacity="0.5"/>
+                                 Width="60" VerticalAlignment="Center" HorizontalAlignment="Left"/>
                     </StackPanel>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.5" Margin="0,0,0,4"
+                               Text="Caps how tall a single video can get, regardless of scale. 0 = no limit, 360 = 360p, 480 = 480p. Useful for very tall clips that would otherwise dominate the description."/>
 
                     <Separator Margin="0,15,0,15"/>
 
