@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -14,6 +15,7 @@ namespace PlayGif.Monitors
 
         private readonly Func<WebView2> _webViewProvider;
         private readonly Func<bool> _isEnabled;
+        private readonly Func<DesktopView> _activeViewProvider;
         private bool _isHooked;
         private bool _loggedMissing;
         private FrameworkElement _hiddenHtmlTextView;
@@ -33,11 +35,19 @@ namespace PlayGif.Monitors
             _loggedMissing = false;
         }
 
-        public DescriptionViewMonitor(Func<WebView2> webViewProvider, Func<bool> isEnabled)
+        public DescriptionViewMonitor(
+            Func<WebView2> webViewProvider,
+            Func<bool> isEnabled,
+            Func<DesktopView> activeViewProvider)
         {
             _webViewProvider = webViewProvider;
             _isEnabled = isEnabled;
+            _activeViewProvider = activeViewProvider;
         }
+
+        // Raised when the injected view is torn down (Grid <-> Details switch, tab
+        // change), so the host can re-inject without waiting for a game selection.
+        public event Action InjectionLost;
 
         public void StartMonitoring()
         {
@@ -45,7 +55,25 @@ namespace PlayGif.Monitors
             EventManager.RegisterClassHandler(typeof(Window),
                 FrameworkElement.LoadedEvent,
                 new RoutedEventHandler(OnWindowLoaded));
+
+            // A theme's description element can also appear late — FusionX nests it
+            // in a lazily-realized TabItem — so watch for HtmlTextView loading too.
+            EventManager.RegisterClassHandler(typeof(FrameworkElement),
+                FrameworkElement.UnloadedEvent,
+                new RoutedEventHandler(OnElementUnloaded));
+
             _isHooked = true;
+        }
+
+        private void OnElementUnloaded(object sender, RoutedEventArgs e)
+        {
+            // Only care about the element we are currently injected against
+            if (_hiddenHtmlTextView == null) return;
+            if (!ReferenceEquals(sender, _hiddenHtmlTextView) &&
+                !ReferenceEquals(sender, _injectionTarget)) return;
+
+            Logger.Info("Injected description view unloaded — signalling re-injection.");
+            InjectionLost?.Invoke();
         }
 
         private void OnWindowLoaded(object sender, RoutedEventArgs e)
@@ -60,17 +88,104 @@ namespace PlayGif.Monitors
             TryInject(window, webView);
         }
 
+        // True when the element we injected into is gone from the live visual tree
+        // or no longer visible — happens when the user switches view (Grid <-> Details)
+        // or moves to a different tab, since WPF tears down the old view.
+        public bool IsStale()
+        {
+            if (_hiddenHtmlTextView == null) return false;
+
+            // Gone from the live tree — the view that owned it was torn down
+            if (!_hiddenHtmlTextView.IsLoaded) return true;
+            if (PresentationSource.FromVisual(_hiddenHtmlTextView) == null) return true;
+
+            // We are parented under a view host that is no longer the active one:
+            // the user switched between Grid and Details. Checked against the SDK
+            // rather than IsVisible, which reads false even for the live element
+            // when a theme collapses an ancestor.
+            var hostName = ActiveViewHostName();
+            if (hostName != null && !IsInsideHost(_hiddenHtmlTextView, hostName))
+                return true;
+
+            return false;
+        }
+
+        // The view host type Playnite instantiates for the active Desktop view.
+        // Themes name these consistently because Playnite loads them by convention.
+        private string ActiveViewHostName()
+        {
+            try
+            {
+                switch (_activeViewProvider())
+                {
+                    case DesktopView.Details: return "DetailsViewGameOverview";
+                    case DesktopView.Grid: return "GridViewGameOverview";
+                    // List view shares the Details overview panel
+                    case DesktopView.List: return "DetailsViewGameOverview";
+                    default: return null;
+                }
+            }
+            catch { return null; }
+        }
+
+        private static bool IsInsideHost(DependencyObject node, string hostTypeName)
+        {
+            var cur = VisualTreeHelper.GetParent(node);
+            while (cur != null)
+            {
+                if (cur.GetType().Name == hostTypeName) return true;
+                cur = VisualTreeHelper.GetParent(cur);
+            }
+            return false;
+        }
+
+        // Laid-out area of the element, or of its parent when it has not been
+        // measured itself (we collapse the element we inject next to).
+        private static double OwnerArea(FrameworkElement e)
+        {
+            var area = e.ActualWidth * e.ActualHeight;
+            if (area > 1) return area;
+            var p = VisualTreeHelper.GetParent(e) as FrameworkElement;
+            return p == null ? 0 : p.ActualWidth * p.ActualHeight;
+        }
+
+        // Detaches the WebView from its current parent so it can be re-injected
+        // into whichever view is now on screen.
+        public void Detach()
+        {
+            var webView = _webViewProvider();
+
+            _clipper?.Detach();
+            _clipper = null;
+
+            if (webView != null)
+            {
+                if (webView.Parent is Panel p) p.Children.Remove(webView);
+                else if (webView.Parent is ContentControl cc && ReferenceEquals(cc.Content, webView)) cc.Content = null;
+                else if (_injectionTarget is ScrollViewer sv && ReferenceEquals(sv.Content, webView)) sv.Content = null;
+            }
+
+            // Restore the theme's own description element in the old view
+            if (_hiddenHtmlTextView != null)
+                _hiddenHtmlTextView.Visibility = Visibility.Visible;
+
+            _hiddenHtmlTextView = null;
+            _injectionTarget = null;
+            _parentScrollViewer = null;
+            _loggedMissing = false;
+        }
+
         public void TryInject(DependencyObject root, WebView2 webView)
         {
             if (webView.Parent != null) return;
 
-            var htmlTextView = FindChildByName(root, Constants.HtmlDescriptionPartName);
+            var htmlTextView = FindVisibleByName(root, Constants.HtmlDescriptionPartName);
 
             if (htmlTextView == null)
             {
                 foreach (var altName in Constants.AlternateDescriptionNames)
                 {
-                    htmlTextView = FindChildByName(root, altName);
+                    htmlTextView = FindVisibleByName(root, altName);
                     if (htmlTextView != null)
                     {
                         Logger.Info($"Found description via alternate name: {altName}");
@@ -84,10 +199,25 @@ namespace PlayGif.Monitors
                 if (!_loggedMissing)
                 {
                     _loggedMissing = true;
-                    Logger.Info("Description element not found in visual tree. Dumping named elements...");
-                    DumpNamedElements(root, 0);
+                    Logger.Info("Description element not found in visual tree.");
+                    DumpDiagnostics(root);
                 }
                 return;
+            }
+
+            // More than one view can declare PART_HtmlDescription (Grid view and
+            // Details view both do), so record whether we picked a hidden one.
+            if (Constants.LogInjectionDiagnostics)
+            {
+                var all = new List<FrameworkElement>();
+                FindAllByName(root, Constants.HtmlDescriptionPartName, all);
+                if (all.Count > 1)
+                {
+                    Logger.Info($"Multiple description elements present ({all.Count}); " +
+                                $"chosen one visible={htmlTextView.IsVisible} " +
+                                $"size={htmlTextView.ActualWidth:F0}x{htmlTextView.ActualHeight:F0}");
+                    DumpDiagnostics(root);
+                }
             }
 
             var parent = VisualTreeHelper.GetParent(htmlTextView);
@@ -211,6 +341,163 @@ namespace PlayGif.Monitors
                     return found;
             }
             return null;
+        }
+
+        // Grid view and Details view both declare PART_HtmlDescription, so the tree
+        // can hold several. Taking the first match injects into whichever the walk
+        // reaches first, which is often the hidden one — pick a rendered element
+        // instead, falling back to the first match if none look visible yet.
+        private FrameworkElement FindVisibleByName(DependencyObject root, string name)
+        {
+            var hits = new List<FrameworkElement>();
+            FindAllByName(root, name, hits);
+            if (hits.Count == 0) return null;
+            if (hits.Count == 1) return hits[0];
+
+            // Ask Playnite which view is active rather than guessing. IsVisible is
+            // useless here — themes collapse an ancestor (an Expander around the
+            // description), so every candidate reports IsVisible=false even when one
+            // of them is in the view on screen.
+            var hostName = ActiveViewHostName();
+            if (hostName != null)
+            {
+                foreach (var e in hits)
+                {
+                    if (IsInsideHost(e, hostName))
+                    {
+                        Logger.Info($"{hits.Count} '{name}' elements; chose the one under {hostName}.");
+                        return e;
+                    }
+                }
+                Logger.Info($"{hits.Count} '{name}' elements, none under {hostName}.");
+            }
+
+            // Fallback: the largest laid-out candidate. The inactive view's copy
+            // is normally 0x0.
+            FrameworkElement best = null;
+            double bestArea = 0;
+            foreach (var e in hits)
+            {
+                if (PresentationSource.FromVisual(e) == null) continue;
+                var area = OwnerArea(e);
+                if (area > bestArea) { bestArea = area; best = e; }
+            }
+
+            if (best != null)
+            {
+                Logger.Info($"Chose the laid-out '{name}' ({best.ActualWidth:F0}x{best.ActualHeight:F0}).");
+                return best;
+            }
+
+            Logger.Info($"{hits.Count} '{name}' elements found, none laid out yet; using the first.");
+            return hits[0];
+        }
+
+        // Collects every element with the given name, not just the first. Grid view
+        // and Details view both declare PART_HtmlDescription, so more than one can
+        // be live at once.
+        private static void FindAllByName(DependencyObject parent, string name, List<FrameworkElement> results)
+        {
+            if (parent == null) return;
+            int count = VisualTreeHelper.GetChildrenCount(parent);
+            for (int i = 0; i < count; i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is FrameworkElement fe && fe.Name == name)
+                    results.Add(fe);
+                FindAllByName(child, name, results);
+            }
+        }
+
+        // Walks up recording the ancestor chain, so we can tell which view an
+        // element belongs to and whether it sits inside a lazily-realized TabItem.
+        private static string DescribeAncestry(DependencyObject node, int maxDepth = 14)
+        {
+            var parts = new List<string>();
+            var cur = VisualTreeHelper.GetParent(node);
+            int depth = 0;
+            while (cur != null && depth++ < maxDepth)
+            {
+                var n = cur is FrameworkElement f && !string.IsNullOrEmpty(f.Name)
+                    ? $"{cur.GetType().Name}#{f.Name}" : cur.GetType().Name;
+                parts.Add(n);
+                cur = VisualTreeHelper.GetParent(cur);
+            }
+            return string.Join(" < ", parts);
+        }
+
+        // Dumps everything needed to tell the two failure modes apart:
+        //   1. element missing entirely  -> lazy TabItem not yet realized
+        //   2. multiple elements present -> we may be injecting into the hidden one
+        public void DumpDiagnostics(DependencyObject root)
+        {
+            try
+            {
+                Logger.Info("===== PlayGif injection diagnostics =====");
+                string activeView;
+                try { activeView = _activeViewProvider().ToString(); }
+                catch (Exception ex) { activeView = "unavailable: " + ex.Message; }
+                Logger.Info($"[active view] {activeView} -> host {ActiveViewHostName() ?? "unknown"}");
+
+                foreach (var name in new[] { Constants.HtmlDescriptionPartName,
+                                             Constants.DescriptionPanelPartName })
+                {
+                    var hits = new List<FrameworkElement>();
+                    FindAllByName(root, name, hits);
+                    Logger.Info($"[{name}] found {hits.Count}");
+
+                    for (int i = 0; i < hits.Count; i++)
+                    {
+                        var e = hits[i];
+                        var tab = FindAncestor<TabItem>(e);
+                        var tabInfo = tab == null ? "none"
+                            : $"{(string.IsNullOrEmpty(tab.Name) ? "(unnamed)" : tab.Name)} selected={tab.IsSelected}";
+                        Logger.Info(
+                            $"  #{i}: type={e.GetType().Name} visible={e.IsVisible} " +
+                            $"loaded={e.IsLoaded} size={e.ActualWidth:F0}x{e.ActualHeight:F0} " +
+                            $"vis={e.Visibility} tabItem=[{tabInfo}]");
+                        var host = ActiveViewHostName();
+                        Logger.Info($"       parent={VisualTreeHelper.GetParent(e)?.GetType().Name ?? "null"} " +
+                                    $"inActiveHost={(host != null && IsInsideHost(e, host))}");
+                        Logger.Info($"       ancestry={DescribeAncestry(e)}");
+                    }
+                }
+
+                // Which TabControls exist and what is selected in each
+                var tabs = new List<FrameworkElement>();
+                CollectByType<TabControl>(root, tabs);
+                Logger.Info($"[TabControls] found {tabs.Count}");
+                foreach (var t in tabs)
+                {
+                    var tc = (TabControl)t;
+                    Logger.Info($"  items={tc.Items.Count} selectedIndex={tc.SelectedIndex} visible={tc.IsVisible}");
+                }
+
+                Logger.Info($"[state] isInjected={IsInjected} scrollViewer={(_parentScrollViewer == null ? "null" : "set")}");
+
+                // Catches themes that use a description element name we don't know
+                Logger.Info("[named elements] description/detail-like names in tree:");
+                DumpNamedElements(root, 0);
+
+                Logger.Info("===== end diagnostics =====");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Diagnostics dump failed");
+            }
+        }
+
+        private static void CollectByType<T>(DependencyObject parent, List<FrameworkElement> results)
+            where T : FrameworkElement
+        {
+            if (parent == null) return;
+            int count = VisualTreeHelper.GetChildrenCount(parent);
+            for (int i = 0; i < count; i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is T t) results.Add(t);
+                CollectByType<T>(child, results);
+            }
         }
 
         private static void DumpNamedElements(DependencyObject parent, int depth)

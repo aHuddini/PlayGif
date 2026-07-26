@@ -22,5 +22,15 @@ namespace PlayGif
 
             vm.BulkFetchSteamDescriptions();
         }
+
+        private void DiagnosticsButton_Click(object sender, RoutedEventArgs e)
+        {
+            (DataContext as PlayGifSettingsViewModel)?.RunLayoutReport();
+        }
+
+        private void OpenLogFolderButton_Click(object sender, RoutedEventArgs e)
+        {
+            (DataContext as PlayGifSettingsViewModel)?.OpenLogFolder();
+        }
     }
 }

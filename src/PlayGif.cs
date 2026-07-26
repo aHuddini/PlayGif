@@ -29,6 +29,7 @@ namespace PlayGif
         private Handlers.MediaLibraryHandler _mediaLibrary;
         private Game _lastSelectedGame;
         private int _injectionAttempts;
+        private bool _rendererEventsHooked;
 
         // Menu handlers are built on first use — the menu can be opened before services initialize
         private Handlers.MediaLibraryHandler MediaLibrary => _mediaLibrary ??
@@ -84,7 +85,26 @@ namespace PlayGif
                 // Set up the visual tree monitor
                 _viewMonitor = new DescriptionViewMonitor(
                     () => _renderer.WebViewControl,
-                    () => Settings.EnableAnimatedDescriptions);
+                    () => Settings.EnableAnimatedDescriptions,
+                    () => _api.MainView.ActiveDesktopView);
+
+                // Switching Grid <-> Details tears down the view we injected into.
+                // Re-inject against whatever is on screen now, without waiting for
+                // the user to select a different game.
+                _viewMonitor.InjectionLost += () =>
+                {
+                    Application.Current.Dispatcher.BeginInvoke(
+                        DispatcherPriority.Loaded,
+                        new Action(() =>
+                        {
+                            if (_lastSelectedGame == null) return;
+                            if (!_viewMonitor.IsStale()) return;
+                            _viewMonitor.Detach();
+                            _injectionAttempts = 0;
+                            TryInjectAndRender(_lastSelectedGame);
+                        }));
+                };
+
                 _viewMonitor.StartMonitoring();
 
                 // Subscribe to window events
@@ -179,6 +199,16 @@ namespace PlayGif
             {
                 if (_renderer?.WebViewControl == null) return;
 
+                // The view we injected into is torn down when the user switches
+                // between Grid and Details, or moves to another tab. Detach so the
+                // WebView can be re-parented into whatever is on screen now.
+                if (_viewMonitor.IsInjected && _viewMonitor.IsStale())
+                {
+                    Logger.Info("Injection target is stale (view changed) — re-injecting.");
+                    _viewMonitor.Detach();
+                    _injectionAttempts = 0;
+                }
+
                 // Step 1: Inject into visual tree if not already done
                 if (!_viewMonitor.IsInjected && _injectionAttempts < 5)
                 {
@@ -197,52 +227,59 @@ namespace PlayGif
                             return;
                         }
 
-                        // Full content height — no internal WebView2 scrolling
-                        // SetWindowRgn clips the HWND, parent ScrollViewer scrolls it
-                        _renderer.HeightReported += (height) =>
+                        // Re-injection reuses the same renderer, so these handlers
+                        // must only ever be wired once
+                        if (!_rendererEventsHooked)
                         {
-                            Application.Current.Dispatcher.BeginInvoke(new Action(() =>
-                            {
-                                _renderer.WebViewControl.Height = height;
-                                // Re-clip after the new height lays out, otherwise the
-                                // HWND region still masks part of the description
-                                Application.Current.Dispatcher.BeginInvoke(
-                                    DispatcherPriority.Loaded,
-                                    new Action(() => _viewMonitor?.RefreshClip()));
-                            }));
-                        };
+                            _rendererEventsHooked = true;
 
-                        // Forward wheel events from WebView2 to parent ScrollViewer
-                        // Batch at render frame rate for smoothness
-                        double _pendingDelta = 0;
-                        bool _renderHooked = false;
+                            // Full content height — no internal WebView2 scrolling
+                            // SetWindowRgn clips the HWND, parent ScrollViewer scrolls it
+                            _renderer.HeightReported += (height) =>
+                            {
+                                Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+                                {
+                                    _renderer.WebViewControl.Height = height;
+                                    // Re-clip after the new height lays out, otherwise the
+                                    // HWND region still masks part of the description
+                                    Application.Current.Dispatcher.BeginInvoke(
+                                        DispatcherPriority.Loaded,
+                                        new Action(() => _viewMonitor?.RefreshClip()));
+                                }));
+                            };
 
-                        _renderer.ScrollOverflow += (delta) =>
-                        {
-                            _pendingDelta += delta;
-                            if (!_renderHooked)
-                            {
-                                _renderHooked = true;
-                                CompositionTarget.Rendering += OnRenderFrame;
-                            }
-                        };
+                            // Forward wheel events from WebView2 to parent ScrollViewer
+                            // Batch at render frame rate for smoothness
+                            double pendingDelta = 0;
+                            bool renderHooked = false;
 
-                        void OnRenderFrame(object s2, EventArgs e2)
-                        {
-                            if (_pendingDelta != 0)
+                            void OnRenderFrame(object s2, EventArgs e2)
                             {
-                                var sv = _viewMonitor.ParentScrollViewer;
-                                if (sv != null)
-                                    sv.ScrollToVerticalOffset(sv.VerticalOffset + _pendingDelta);
-                                _pendingDelta = 0;
+                                if (pendingDelta != 0)
+                                {
+                                    // Resolved per frame so it follows re-injection
+                                    var sv = _viewMonitor.ParentScrollViewer;
+                                    if (sv != null)
+                                        sv.ScrollToVerticalOffset(sv.VerticalOffset + pendingDelta);
+                                    pendingDelta = 0;
+                                }
+                                else
+                                {
+                                    renderHooked = false;
+                                    CompositionTarget.Rendering -= OnRenderFrame;
+                                }
                             }
-                            else
+
+                            _renderer.ScrollOverflow += (delta) =>
                             {
-                                _renderHooked = false;
-                                CompositionTarget.Rendering -= OnRenderFrame;
-                            }
+                                pendingDelta += delta;
+                                if (!renderHooked)
+                                {
+                                    renderHooked = true;
+                                    CompositionTarget.Rendering += OnRenderFrame;
+                                }
+                            };
                         }
-
 
                         Logger.Info("WebView2 fully initialized.");
                     }
@@ -416,6 +453,80 @@ namespace PlayGif
                 Logger.Error(ex, "Failed to copy media file");
                 _api.Dialogs.ShowMessage($"Failed to copy file: {ex.Message}", Constants.PluginName);
                 return null;
+            }
+        }
+
+        // Called from the Theme Support settings tab
+        public void RunLayoutReport()
+        {
+            if (_viewMonitor == null)
+            {
+                _api.Dialogs.ShowMessage(
+                    "PlayGif has not started rendering yet. Open a game in your library first, then run the report.",
+                    Constants.PluginName);
+                return;
+            }
+
+            _viewMonitor.DumpDiagnostics(Application.Current.MainWindow);
+
+            var view = _api.MainView.ActiveDesktopView.ToString();
+            var attached = _viewMonitor.IsInjected
+                ? "attached to the description panel"
+                : "NOT attached — descriptions will not animate";
+
+            var result = _api.Dialogs.ShowMessage(
+                $"Layout report written to extension.log.\n\n" +
+                $"Active view: {view}\n" +
+                $"Renderer: {attached}\n\n" +
+                "Open the log folder now?",
+                Constants.PluginName,
+                MessageBoxButton.YesNo);
+
+            if (result == MessageBoxResult.Yes) OpenLogFolder();
+        }
+
+        public void OpenLogFolderPublic() => OpenLogFolder();
+
+        // Opens Explorer with extension.log selected. Playnite writes logs next to
+        // the config, which is the install dir in portable mode and %AppData% otherwise.
+        private void OpenLogFolder()
+        {
+            try
+            {
+                var candidates = new[]
+                {
+                    _api.Paths.ConfigurationPath,
+                    System.IO.Path.GetDirectoryName(
+                        System.Reflection.Assembly.GetEntryAssembly()?.Location ?? "")
+                };
+
+                foreach (var dir in candidates)
+                {
+                    if (string.IsNullOrEmpty(dir) || !System.IO.Directory.Exists(dir)) continue;
+
+                    var log = System.IO.Path.Combine(dir, "extension.log");
+                    if (System.IO.File.Exists(log))
+                    {
+                        System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{log}\"");
+                        return;
+                    }
+                }
+
+                // No extension.log yet — just open the configuration folder
+                if (System.IO.Directory.Exists(_api.Paths.ConfigurationPath))
+                {
+                    System.Diagnostics.Process.Start("explorer.exe", $"\"{_api.Paths.ConfigurationPath}\"");
+                    return;
+                }
+
+                _api.Dialogs.ShowMessage(
+                    $"Could not locate the log folder.\nExpected it at:\n{_api.Paths.ConfigurationPath}",
+                    Constants.PluginName);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Failed to open the log folder");
+                _api.Dialogs.ShowMessage($"Failed to open the log folder: {ex.Message}", Constants.PluginName);
             }
         }
 
@@ -886,6 +997,26 @@ namespace PlayGif
 
             // Diagnostic — hidden unless debug mode is on
             if (!Settings.EnableDebugMode) return items;
+
+            items.Add(new GameMenuItem
+            {
+                MenuSection = Constants.MenuSectionName,
+                Description = "Dump layout diagnostics",
+                Action = (menuArgs) =>
+                {
+                    // Runs against whatever view is open right now, which is the
+                    // only way to capture Grid-view and tab state accurately.
+                    _viewMonitor?.DumpDiagnostics(Application.Current.MainWindow);
+                    OpenLogFolder();
+                }
+            });
+
+            items.Add(new GameMenuItem
+            {
+                MenuSection = Constants.MenuSectionName,
+                Description = "Open debug log folder",
+                Action = (menuArgs) => OpenLogFolder()
+            });
 
             items.Add(new GameMenuItem
             {

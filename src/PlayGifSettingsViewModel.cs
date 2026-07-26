@@ -56,5 +56,15 @@ namespace PlayGif
         {
             _plugin.RunBulkSteamFetch();
         }
+
+        public void RunLayoutReport()
+        {
+            _plugin.RunLayoutReport();
+        }
+
+        public void OpenLogFolder()
+        {
+            _plugin.OpenLogFolderPublic();
+        }
     }
 }

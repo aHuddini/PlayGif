@@ -26,19 +26,19 @@ Built with the help of Claude Code
 
 https://github.com/user-attachments/assets/90acd659-e195-446f-aeab-e5349ae84fd7
 
-## What's New - v1.0.0
+## What's New - v1.0.1
+
+### Fixed
+- **Descriptions keep animating when you switch views.** Moving between Grid and Details used to leave the description static until Playnite was restarted.
+- **Grid view animates properly.** In Grid view the description could stay static while the animated version rendered out of sight.
 
 ### Added
-- **Animated descriptions.** Steam store trailers, GIFs, animated WebP and AVIF play inline instead of appearing as static text.
-- **Fetch rich descriptions** from Steam or GOG for a single game, or in bulk across your whole library.
-- **Add your own media** to any description — from a local file, a URL, or a built-in web image search.
-- **Per-game video scale** (25/50/75%), plus a global scale and max-height limit.
+- **Theme Support settings tab.** If descriptions do not animate correctly in your theme, run the layout report and attach it to a bug report.
+- **Open debug log folder** — finds `extension.log` for you.
 
-### Performance
-- **Videos play as H.264 MP4 wherever available.** Steam serves both VP9 WebM and H.264 MP4; PlayGif now always picks the MP4, which is hardware-decoded far more widely — noticeably smoother playback and roughly half the disk use.
-- **Offline media caching** with a configurable per-game size limit.
-- Playback pauses automatically while a game is running or when Playnite loses focus.
-  
+### Previous Version
+- **v1.0.0**: first release — animated descriptions, Steam/GOG description fetching, custom media, per-game video scale, and offline caching.
+
 ---
 
 ## Features
@@ -84,6 +84,8 @@ Right-click any game for the **PlayGif** menu:
 | **Fetch description** | Pull a rich description from Steam or GOG |
 
 Library-wide options live in **Settings → PlayGif**, including the bulk Steam fetch.
+
+If descriptions do not render correctly in your theme, open **Settings → PlayGif → Theme Support** and run the layout report — it records what PlayGif found in your theme's panel, which is what a bug report needs.
 
 ---
 
