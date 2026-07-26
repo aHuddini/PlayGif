@@ -15,6 +15,7 @@ namespace PlayGif.Monitors
 
         private readonly Func<WebView2> _webViewProvider;
         private readonly Func<bool> _isEnabled;
+        private readonly Func<DesktopView> _activeViewProvider;
         private bool _isHooked;
         private bool _loggedMissing;
         private FrameworkElement _hiddenHtmlTextView;
@@ -34,10 +35,14 @@ namespace PlayGif.Monitors
             _loggedMissing = false;
         }
 
-        public DescriptionViewMonitor(Func<WebView2> webViewProvider, Func<bool> isEnabled)
+        public DescriptionViewMonitor(
+            Func<WebView2> webViewProvider,
+            Func<bool> isEnabled,
+            Func<DesktopView> activeViewProvider)
         {
             _webViewProvider = webViewProvider;
             _isEnabled = isEnabled;
+            _activeViewProvider = activeViewProvider;
         }
 
         // Raised when the injected view is torn down (Grid <-> Details switch, tab
@@ -89,16 +94,59 @@ namespace PlayGif.Monitors
         public bool IsStale()
         {
             if (_hiddenHtmlTextView == null) return false;
+
+            // Gone from the live tree — the view that owned it was torn down
             if (!_hiddenHtmlTextView.IsLoaded) return true;
             if (PresentationSource.FromVisual(_hiddenHtmlTextView) == null) return true;
 
-            // The panel we injected into may still be loaded but hidden behind
-            // another view; treat a zero-size or collapsed ancestor as stale.
-            var panel = _injectionTarget as FrameworkElement;
-            if (panel != null && panel.IsLoaded &&
-                panel.ActualWidth < 1 && panel.ActualHeight < 1) return true;
+            // We are parented under a view host that is no longer the active one:
+            // the user switched between Grid and Details. Checked against the SDK
+            // rather than IsVisible, which reads false even for the live element
+            // when a theme collapses an ancestor.
+            var hostName = ActiveViewHostName();
+            if (hostName != null && !IsInsideHost(_hiddenHtmlTextView, hostName))
+                return true;
 
             return false;
+        }
+
+        // The view host type Playnite instantiates for the active Desktop view.
+        // Themes name these consistently because Playnite loads them by convention.
+        private string ActiveViewHostName()
+        {
+            try
+            {
+                switch (_activeViewProvider())
+                {
+                    case DesktopView.Details: return "DetailsViewGameOverview";
+                    case DesktopView.Grid: return "GridViewGameOverview";
+                    // List view shares the Details overview panel
+                    case DesktopView.List: return "DetailsViewGameOverview";
+                    default: return null;
+                }
+            }
+            catch { return null; }
+        }
+
+        private static bool IsInsideHost(DependencyObject node, string hostTypeName)
+        {
+            var cur = VisualTreeHelper.GetParent(node);
+            while (cur != null)
+            {
+                if (cur.GetType().Name == hostTypeName) return true;
+                cur = VisualTreeHelper.GetParent(cur);
+            }
+            return false;
+        }
+
+        // Laid-out area of the element, or of its parent when it has not been
+        // measured itself (we collapse the element we inject next to).
+        private static double OwnerArea(FrameworkElement e)
+        {
+            var area = e.ActualWidth * e.ActualHeight;
+            if (area > 1) return area;
+            var p = VisualTreeHelper.GetParent(e) as FrameworkElement;
+            return p == null ? 0 : p.ActualWidth * p.ActualHeight;
         }
 
         // Detaches the WebView from its current parent so it can be re-injected
@@ -299,26 +347,49 @@ namespace PlayGif.Monitors
         // can hold several. Taking the first match injects into whichever the walk
         // reaches first, which is often the hidden one — pick a rendered element
         // instead, falling back to the first match if none look visible yet.
-        private static FrameworkElement FindVisibleByName(DependencyObject root, string name)
+        private FrameworkElement FindVisibleByName(DependencyObject root, string name)
         {
             var hits = new List<FrameworkElement>();
             FindAllByName(root, name, hits);
             if (hits.Count == 0) return null;
             if (hits.Count == 1) return hits[0];
 
-            foreach (var e in hits)
+            // Ask Playnite which view is active rather than guessing. IsVisible is
+            // useless here — themes collapse an ancestor (an Expander around the
+            // description), so every candidate reports IsVisible=false even when one
+            // of them is in the view on screen.
+            var hostName = ActiveViewHostName();
+            if (hostName != null)
             {
-                if (e.IsVisible && PresentationSource.FromVisual(e) != null)
+                foreach (var e in hits)
                 {
-                    // A parent that has laid out has real dimensions; a hidden
-                    // view's panel is typically zero-sized.
-                    var parent = VisualTreeHelper.GetParent(e) as FrameworkElement;
-                    if (parent == null || parent.ActualWidth > 1 || parent.ActualHeight > 1)
+                    if (IsInsideHost(e, hostName))
+                    {
+                        Logger.Info($"{hits.Count} '{name}' elements; chose the one under {hostName}.");
                         return e;
+                    }
                 }
+                Logger.Info($"{hits.Count} '{name}' elements, none under {hostName}.");
             }
 
-            Logger.Info($"{hits.Count} '{name}' elements found, none visible yet; using the first.");
+            // Fallback: the largest laid-out candidate. The inactive view's copy
+            // is normally 0x0.
+            FrameworkElement best = null;
+            double bestArea = 0;
+            foreach (var e in hits)
+            {
+                if (PresentationSource.FromVisual(e) == null) continue;
+                var area = OwnerArea(e);
+                if (area > bestArea) { bestArea = area; best = e; }
+            }
+
+            if (best != null)
+            {
+                Logger.Info($"Chose the laid-out '{name}' ({best.ActualWidth:F0}x{best.ActualHeight:F0}).");
+                return best;
+            }
+
+            Logger.Info($"{hits.Count} '{name}' elements found, none laid out yet; using the first.");
             return hits[0];
         }
 
@@ -363,6 +434,10 @@ namespace PlayGif.Monitors
             try
             {
                 Logger.Info("===== PlayGif injection diagnostics =====");
+                string activeView;
+                try { activeView = _activeViewProvider().ToString(); }
+                catch (Exception ex) { activeView = "unavailable: " + ex.Message; }
+                Logger.Info($"[active view] {activeView} -> host {ActiveViewHostName() ?? "unknown"}");
 
                 foreach (var name in new[] { Constants.HtmlDescriptionPartName,
                                              Constants.DescriptionPanelPartName })
@@ -381,7 +456,9 @@ namespace PlayGif.Monitors
                             $"  #{i}: type={e.GetType().Name} visible={e.IsVisible} " +
                             $"loaded={e.IsLoaded} size={e.ActualWidth:F0}x{e.ActualHeight:F0} " +
                             $"vis={e.Visibility} tabItem=[{tabInfo}]");
-                        Logger.Info($"       parent={VisualTreeHelper.GetParent(e)?.GetType().Name ?? "null"}");
+                        var host = ActiveViewHostName();
+                        Logger.Info($"       parent={VisualTreeHelper.GetParent(e)?.GetType().Name ?? "null"} " +
+                                    $"inActiveHost={(host != null && IsInsideHost(e, host))}");
                         Logger.Info($"       ancestry={DescribeAncestry(e)}");
                     }
                 }

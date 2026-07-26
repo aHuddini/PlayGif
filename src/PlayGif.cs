@@ -85,7 +85,8 @@ namespace PlayGif
                 // Set up the visual tree monitor
                 _viewMonitor = new DescriptionViewMonitor(
                     () => _renderer.WebViewControl,
-                    () => Settings.EnableAnimatedDescriptions);
+                    () => Settings.EnableAnimatedDescriptions,
+                    () => _api.MainView.ActiveDesktopView);
 
                 // Switching Grid <-> Details tears down the view we injected into.
                 // Re-inject against whatever is on screen now, without waiting for
@@ -452,6 +453,49 @@ namespace PlayGif
                 Logger.Error(ex, "Failed to copy media file");
                 _api.Dialogs.ShowMessage($"Failed to copy file: {ex.Message}", Constants.PluginName);
                 return null;
+            }
+        }
+
+        // Opens Explorer with extension.log selected. Playnite writes logs next to
+        // the config, which is the install dir in portable mode and %AppData% otherwise.
+        private void OpenLogFolder()
+        {
+            try
+            {
+                var candidates = new[]
+                {
+                    _api.Paths.ConfigurationPath,
+                    System.IO.Path.GetDirectoryName(
+                        System.Reflection.Assembly.GetEntryAssembly()?.Location ?? "")
+                };
+
+                foreach (var dir in candidates)
+                {
+                    if (string.IsNullOrEmpty(dir) || !System.IO.Directory.Exists(dir)) continue;
+
+                    var log = System.IO.Path.Combine(dir, "extension.log");
+                    if (System.IO.File.Exists(log))
+                    {
+                        System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{log}\"");
+                        return;
+                    }
+                }
+
+                // No extension.log yet — just open the configuration folder
+                if (System.IO.Directory.Exists(_api.Paths.ConfigurationPath))
+                {
+                    System.Diagnostics.Process.Start("explorer.exe", $"\"{_api.Paths.ConfigurationPath}\"");
+                    return;
+                }
+
+                _api.Dialogs.ShowMessage(
+                    $"Could not locate the log folder.\nExpected it at:\n{_api.Paths.ConfigurationPath}",
+                    Constants.PluginName);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Failed to open the log folder");
+                _api.Dialogs.ShowMessage($"Failed to open the log folder: {ex.Message}", Constants.PluginName);
             }
         }
 
@@ -932,12 +976,15 @@ namespace PlayGif
                     // Runs against whatever view is open right now, which is the
                     // only way to capture Grid-view and tab state accurately.
                     _viewMonitor?.DumpDiagnostics(Application.Current.MainWindow);
-                    _api.Dialogs.ShowMessage(
-                        "Layout diagnostics written to extension.log.\n\n" +
-                        "Open it from Playnite: Help -> Open application directory,\n" +
-                        "then extension.log in that folder.",
-                        Constants.PluginName);
+                    OpenLogFolder();
                 }
+            });
+
+            items.Add(new GameMenuItem
+            {
+                MenuSection = Constants.MenuSectionName,
+                Description = "Open debug log folder",
+                Action = (menuArgs) => OpenLogFolder()
             });
 
             items.Add(new GameMenuItem
