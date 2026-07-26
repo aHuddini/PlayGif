@@ -24,7 +24,7 @@ Built with the help of Claude Code
 
 ---
 
-https://github.com/user-attachments/assets/3733e044-13ad-4b5e-a439-b0f39a88ac9c
+https://github.com/user-attachments/assets/90acd659-e195-446f-aeab-e5349ae84fd7
 
 ## What's New - v1.0.0
 
