@@ -42,8 +42,8 @@ function New-FrameSvg {
 
     # Sparks fade in behind the blade and decay
     $sparkOps = @(0.85, 0.7, 0.6, 0.5, 0.4)
-    $sparkXs  = @(207, 193, 164, 146, 115)
-    $sparkYs  = @(68.4, 96.5, 104.1, 128.7, 137.6)
+    $sparkXs  = @(203, 189, 165, 143, 117)
+    $sparkYs  = @(76.4, 97.4, 105.7, 122.8, 133.6)
     $sparkRs  = @(5.0, 4.0, 3.4, 2.9, 2.4)
 
     $sparks = ""
@@ -67,6 +67,8 @@ function New-FrameSvg {
 <defs>
 <linearGradient id="acc" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3B82F6"/><stop offset="1" stop-color="#22D3EE"/></linearGradient>
 <linearGradient id="glass" x1="0" y1="0" x2="0.6" y2="1"><stop offset="0" stop-color="#60A5FA" stop-opacity="0.20"/><stop offset="1" stop-color="#0EA5E9" stop-opacity="0.05"/></linearGradient>
+<linearGradient id="media" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7C3AED"/><stop offset="0.5" stop-color="#DB2777"/><stop offset="1" stop-color="#F59E0B"/></linearGradient>
+<linearGradient id="media2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0EA5E9"/><stop offset="0.55" stop-color="#14B8A6"/><stop offset="1" stop-color="#A3E635"/></linearGradient>
 <clipPath id="scr"><rect x="27" y="41" width="202" height="116" rx="12"/></clipPath>
 <clipPath id="beforeCut"><path d="M 27 41 L $xTop 41 L $xBot 157 L 27 157 Z"/></clipPath>
 <clipPath id="afterCut"><path d="M $xTop 41 L 229 41 L 229 157 L $xBot 157 Z"/></clipPath>
@@ -74,17 +76,21 @@ function New-FrameSvg {
 <rect x="16" y="30" width="224" height="138" rx="20" fill="#0B1220" stroke="url(#acc)" stroke-width="9"/>
 <rect x="27" y="41" width="202" height="116" rx="12" fill="url(#glass)"/>
 <g clip-path="url(#scr)">
-  <g clip-path="url(#beforeCut)" fill="#64748B" fill-opacity="0.7">
-    <rect x="44" y="62" width="86" height="9" rx="4.5"/>
-    <rect x="44" y="82" width="110" height="9" rx="4.5"/>
-    <rect x="44" y="102" width="72" height="9" rx="4.5"/>
-    <rect x="44" y="122" width="96" height="9" rx="4.5"/>
+  <g clip-path="url(#beforeCut)">
+    <rect x="42" y="50" width="152" height="26" rx="4" fill="#3A4658"/>
+    <rect x="42" y="80" width="96" height="7" rx="3.5" fill="#64748B" fill-opacity="0.75"/>
+    <rect x="42" y="91" width="120" height="7" rx="3.5" fill="#64748B" fill-opacity="0.75"/>
+    <rect x="42" y="104" width="152" height="22" rx="4" fill="#3A4658"/>
+    <rect x="42" y="130" width="82" height="7" rx="3.5" fill="#64748B" fill-opacity="0.75"/>
+    <rect x="42" y="141" width="110" height="7" rx="3.5" fill="#64748B" fill-opacity="0.75"/>
   </g>
-  <g clip-path="url(#afterCut)" fill="url(#acc)">
-    <rect x="44" y="62" width="150" height="9" rx="4.5"/>
-    <rect x="44" y="82" width="150" height="9" rx="4.5"/>
-    <rect x="44" y="102" width="150" height="9" rx="4.5"/>
-    <rect x="44" y="122" width="150" height="9" rx="4.5"/>
+  <g clip-path="url(#afterCut)">
+    <rect x="42" y="50" width="152" height="26" rx="4" fill="url(#media)"/>
+    <rect x="42" y="80" width="96" height="7" rx="3.5" fill="url(#acc)"/>
+    <rect x="42" y="91" width="120" height="7" rx="3.5" fill="url(#acc)"/>
+    <rect x="42" y="104" width="152" height="22" rx="4" fill="url(#media2)"/>
+    <rect x="42" y="130" width="82" height="7" rx="3.5" fill="url(#acc)"/>
+    <rect x="42" y="141" width="110" height="7" rx="3.5" fill="url(#acc)"/>
   </g>
   <path d="M $xTop 38 L $xBot 160" stroke="#F0F9FF" stroke-width="7" stroke-linecap="round"/>
   <path d="M $xTop 38 L $xBot 160" stroke="url(#acc)" stroke-width="3" stroke-linecap="round"/>

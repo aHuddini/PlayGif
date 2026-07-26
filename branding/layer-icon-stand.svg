@@ -13,6 +13,19 @@
       <stop offset="0" stop-color="#60A5FA" stop-opacity="0.20"/>
       <stop offset="1" stop-color="#0EA5E9" stop-opacity="0.05"/>
     </linearGradient>
+    <!-- Media blocks read as game art, not text. Hues sampled from real Steam
+         capsule artwork (magenta/gold/teal) so the "after" state looks like
+         imagery rather than styled text. -->
+    <linearGradient id="media" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7C3AED"/>
+      <stop offset="0.5" stop-color="#DB2777"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+    <linearGradient id="media2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0EA5E9"/>
+      <stop offset="0.55" stop-color="#14B8A6"/>
+      <stop offset="1" stop-color="#A3E635"/>
+    </linearGradient>
     <clipPath id="scr"><rect x="27" y="41" width="202" height="116" rx="12"/></clipPath>
     <!-- everything left of the cut: the "before" state -->
     <clipPath id="beforeCut"><path d="M 27 41 L 210 41 L 60 157 L 27 157 Z"/></clipPath>
