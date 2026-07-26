@@ -24,8 +24,8 @@ New-Item -ItemType Directory -Path $work | Out-Null
 
 # Sweep geometry. The cut travels from off-screen right to off-screen left;
 # at each step the before/after clip boundary moves with it.
-$FRAMES = 22
-$SIZE   = 256
+$FRAMES = 18
+$SIZE   = 220
 
 # Cut direction is fixed (down-left at the same angle); only its offset moves.
 # x at the top edge of the screen travels from 250 (off right) to 8 (off left).
@@ -120,23 +120,46 @@ for ($i = 0; $i -lt $FRAMES; $i++) {
 }
 Write-Host "  $FRAMES frames rendered"
 
-# Hold the final composed frame so the loop reads as "slash, then rest"
-$last = Join-Path $work ("f{0:d3}.png" -f ($FRAMES-1))
-for ($h = 0; $h -lt 8; $h++) {
-    Copy-Item $last (Join-Path $work ("f{0:d3}.png" -f ($FRAMES + $h)))
+# Ping-pong: sweep in, hold on the finished mark, sweep back out, hold on the
+# blank state. Mirroring the frames makes the loop seamless in both directions,
+# so there is no jump-cut back to the start.
+$HOLD_END   = 8
+$HOLD_START = 5
+$seq = 0
+$ordered = New-Object System.Collections.Generic.List[string]
+
+# forward sweep
+for ($i = 0; $i -lt $FRAMES; $i++) { $ordered.Add((Join-Path $work ("f{0:d3}.png" -f $i))) }
+# hold on the composed mark
+for ($h = 0; $h -lt $HOLD_END; $h++) { $ordered.Add((Join-Path $work ("f{0:d3}.png" -f ($FRAMES-1)))) }
+# reverse sweep - skip the endpoints so neither hold frame is duplicated
+for ($i = $FRAMES-2; $i -gt 0; $i--) { $ordered.Add((Join-Path $work ("f{0:d3}.png" -f $i))) }
+# hold on the blank state before it starts again
+for ($h = 0; $h -lt $HOLD_START; $h++) { $ordered.Add((Join-Path $work ("f{0:d3}.png" -f 0))) }
+
+# Renumber into a contiguous sequence ffmpeg can glob
+$seqDir = Join-Path $work "seq"
+New-Item -ItemType Directory -Path $seqDir | Out-Null
+foreach ($src in $ordered) {
+    Copy-Item $src (Join-Path $seqDir ("s{0:d4}.png" -f $seq))
+    $seq++
 }
+Write-Host "  $seq frames after ping-pong ($FRAMES forward + $HOLD_END hold + reverse + $HOLD_START hold)"
 
 Write-Host "`nAssembling GIF..." -ForegroundColor Cyan
 $pal = Join-Path $work "palette.png"
-$pattern = Join-Path $work "f%03d.png"
+$pattern = Join-Path $seqDir "s%04d.png"
 $gif = Join-Path $brand "PlayGif-animated.gif"
 
-# Two-pass palette keeps the blue gradient from banding
+# Two-pass palette keeps the blue gradient from banding.
+# stats_mode=full (not diff) is required for a transparent GIF - diff mode
+# optimizes against the previous frame and drops the reserved alpha entry,
+# which renders the logo on an opaque black box.
 & $ffmpeg -y -loglevel error -framerate 24 -i $pattern `
-    -vf "palettegen=stats_mode=diff:max_colors=160:reserve_transparent=1" $pal
+    -vf "palettegen=stats_mode=full:max_colors=192:reserve_transparent=1" $pal
 & $ffmpeg -y -loglevel error -framerate 24 -i $pattern -i $pal `
     -lavfi "paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle:alpha_threshold=128" `
-    -loop 0 $gif
+    -gifflags -offsetting -loop 0 $gif
 
 if (-not (Test-Path $gif)) { throw "GIF assembly failed" }
 Write-Host ("  PlayGif-animated.gif ({0:N0} bytes)" -f (Get-Item $gif).Length)
