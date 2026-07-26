@@ -205,21 +205,6 @@ namespace PlayGif.Monitors
                 return;
             }
 
-            // More than one view can declare PART_HtmlDescription (Grid view and
-            // Details view both do), so record whether we picked a hidden one.
-            if (Constants.LogInjectionDiagnostics)
-            {
-                var all = new List<FrameworkElement>();
-                FindAllByName(root, Constants.HtmlDescriptionPartName, all);
-                if (all.Count > 1)
-                {
-                    Logger.Info($"Multiple description elements present ({all.Count}); " +
-                                $"chosen one visible={htmlTextView.IsVisible} " +
-                                $"size={htmlTextView.ActualWidth:F0}x{htmlTextView.ActualHeight:F0}");
-                    DumpDiagnostics(root);
-                }
-            }
-
             var parent = VisualTreeHelper.GetParent(htmlTextView);
             if (parent == null)
             {
