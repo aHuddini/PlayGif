@@ -2,6 +2,22 @@
 
 All notable changes to PlayGif will be documented in this file.
 
+## [1.0.1] - 2026-07-26
+
+### Fixed
+- **Descriptions stopped animating after a view change.** Injection was one-shot: `IsInjected` latched on the first success and `TryInject` early-returns while the WebView already has a parent, so the renderer stayed bound to whichever panel it first attached to. Switching between Grid and Details tears that view down, leaving the renderer drawing into a panel that is no longer on screen. It now detects a stale target, detaches, and re-attaches to the live view.
+- **Grid view showed a static description.** Both `GridViewGameOverview` and `DetailsViewGameOverview` declare `PART_HtmlDescription`, and the search took the first match — often the hidden Details copy. Selection now uses `IMainViewAPI.ActiveDesktopView` and picks the candidate under the matching view host.
+  - `IsVisible` is not usable for this: themes that wrap the description in a collapsed `Expander` (Harmony, Stardust) make every candidate report `IsVisible=false`, including the one actually on screen. Laid-out size is the fallback.
+
+### Added
+- **Theme Support settings tab.** Runs a layout report describing what PlayGif found in the theme's visual tree, reports whether the renderer is attached and which view is active, and links to the log folder. Per-theme compatibility patches will live here if a theme ever needs one.
+- **Open debug log folder** menu item and settings button, which selects `extension.log` in Explorer.
+
+### Changed
+- Renderer event handlers (`HeightReported`, `ScrollOverflow`) are wired once instead of per injection, since re-attachment reuses the same renderer and would otherwise stack duplicate subscriptions.
+- The scroll handler resolves the parent `ScrollViewer` per frame so it follows re-attachment.
+- Verbose injection logging is off by default; Grid view always has two description candidates, so it fired during ordinary browsing.
+
 ## [1.0.0] - 2026-07-25
 
 First public release.

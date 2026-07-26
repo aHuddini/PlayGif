@@ -69,6 +69,42 @@
             </ScrollViewer>
         </TabItem>
 
+        <!-- Theme Support Tab -->
+        <TabItem Header="Theme Support">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="20">
+                    <TextBlock Text="Theme Compatibility" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" Opacity="0.7"
+                               Text="PlayGif renders inside your theme's own description panel, and themes lay that panel out differently. It detects the active view automatically and re-attaches when you switch between Grid and Details, so no configuration is normally needed."/>
+
+                    <Border BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,16"
+                            BorderBrush="{DynamicResource NormalBorderBrush}">
+                        <StackPanel>
+                            <TextBlock Text="Having trouble with your theme?" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,0,0,10"
+                                       Text="If descriptions do not animate, appear blank, or show in the wrong place, run the layout report below. It records what PlayGif found in your theme's visual tree, which is what a bug report needs."/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Run layout report"
+                                        Click="DiagnosticsButton_Click"
+                                        Padding="12,6" Margin="0,0,8,0"/>
+                                <Button Content="Open log folder"
+                                        Click="OpenLogFolderButton_Click"
+                                        Padding="12,6"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Separator Margin="0,0,0,16"/>
+
+                    <TextBlock Text="Compatibility Patches" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.7" Margin="0,0,0,8"
+                               Text="Per-theme layout overrides appear here when a theme needs one. None are required at the moment — view detection and re-attachment are handled automatically for every theme."/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.55" FontStyle="Italic"
+                               Text="Found a theme that needs a patch? Attach the layout report to an issue on GitHub and it can be added here."/>
+                </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+
         <!-- Advanced Tab -->
         <TabItem Header="Advanced">
             <ScrollViewer VerticalScrollBarVisibility="Auto">

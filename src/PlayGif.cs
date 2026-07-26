@@ -456,6 +456,37 @@ namespace PlayGif
             }
         }
 
+        // Called from the Theme Support settings tab
+        public void RunLayoutReport()
+        {
+            if (_viewMonitor == null)
+            {
+                _api.Dialogs.ShowMessage(
+                    "PlayGif has not started rendering yet. Open a game in your library first, then run the report.",
+                    Constants.PluginName);
+                return;
+            }
+
+            _viewMonitor.DumpDiagnostics(Application.Current.MainWindow);
+
+            var view = _api.MainView.ActiveDesktopView.ToString();
+            var attached = _viewMonitor.IsInjected
+                ? "attached to the description panel"
+                : "NOT attached — descriptions will not animate";
+
+            var result = _api.Dialogs.ShowMessage(
+                $"Layout report written to extension.log.\n\n" +
+                $"Active view: {view}\n" +
+                $"Renderer: {attached}\n\n" +
+                "Open the log folder now?",
+                Constants.PluginName,
+                MessageBoxButton.YesNo);
+
+            if (result == MessageBoxResult.Yes) OpenLogFolder();
+        }
+
+        public void OpenLogFolderPublic() => OpenLogFolder();
+
         // Opens Explorer with extension.log selected. Playnite writes logs next to
         // the config, which is the install dir in portable mode and %AppData% otherwise.
         private void OpenLogFolder()
