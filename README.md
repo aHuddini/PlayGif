@@ -39,6 +39,16 @@ Built with the help of Claude Code
 
 ---
 
+## Demo
+
+https://github.com/user-attachments/assets/REPLACE_AFTER_UPLOAD
+
+<p align="center">
+  <img src="docs/assets/screenshot-desktop.png" alt="PlayGif rendering an animated Steam description" width="720">
+</p>
+
+---
+
 ## Features
 
 - **Animated inline content** — video, GIF, animated WebP and AVIF, rendered by the WebView2 engine
