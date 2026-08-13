@@ -17,6 +17,18 @@ All notable changes to PlayGif will be documented in this file.
   - The cap is removed, and a `Loaded` class handler raises `DescriptionAppeared` when a description element enters the tree while not injected, so injection happens as soon as the panel is built. This mirrors the existing `Unloaded` handler, making both directions event-driven.
   - Marked a fix attempt because it depends on live startup timing and cannot be reproduced or confirmed outside a real Playnite session.
 
+### Added
+- **Convert cached media to MP4** (Settings → General → Cache). Re-encodes cached GIF, WebM and animated WebP/APNG with FFmpeg. A GIF stores every frame as a full image, so the saving is large — 35 GIFs totalling 116 MB converted to roughly 8 MB on the test library — and H.264 is hardware-decoded where GIF is not.
+  - Two encoder arguments are load-bearing and must stay together: `yuv420p`, because libx264 otherwise picks `yuv444p` for GIF input which most browsers and hardware decoders will not play; and a scale filter rounding to even dimensions, because `yuv420p` requires them and GIFs are frequently odd-sized. Supplying only one produces a file that looks converted but does not render.
+  - Originals are deleted only after the MP4 is confirmed on disk.
+- **Repair description links**, alongside the convert button. Runs automatically after a conversion, and separately for anyone who converted before it existed.
+
+### Fixed
+- **A pipe deadlock in the FFmpeg conversion path.** `stderr` was redirected but never drained, so FFmpeg blocked once the buffer filled and `WaitForExit` reported a timeout for a conversion that had actually succeeded — the good MP4 was then deleted. Reproduced on a 17 MB GIF. `stderr` is now read asynchronously. This affected the existing WebM path too; it only escaped notice because WebM sources are small enough not to fill the buffer.
+- **Descriptions broke after converting media.** `Map()` only resolves remote URLs, so it never saw media added through "Add media" — that is written into the description as a `playgif.local` URL at insert time. After conversion the original was gone and the reference dangled.
+- **`<img>` tags were left pointing at MP4 files.** Both repair paths rewrote the raw HTML with a string replace, swapping the extension while leaving the element an `<img>`, which can never play an MP4. Repair then found nothing to do on later runs because the reference already named an existing file. Both paths now parse the HTML and replace the element, and recognise an `<img>` already naming an `.mp4` so descriptions damaged by the earlier repair are recovered. The original `style` attribute is carried over.
+- **Links to media that no longer exists are removed.** Clearing the cache deletes the media but leaves the description pointing at it, and there is no MP4 to re-point to, so the dead tag is dropped rather than rendering a broken image. A dead `<source>` takes its parent `<video>` with it.
+
 ### Changed
 - Injection attempt logging is throttled. It now runs on every game selection until the panel appears, and `extension.log` is shared with every extension.
 - The `Loaded` handler sees every element in the application, so its guards are ordered cheapest-first, duplicate events for the same element are ignored (WPF re-raises `Loaded` on re-parenting), and the guard resets in `Detach` so re-injection after a view switch still works.

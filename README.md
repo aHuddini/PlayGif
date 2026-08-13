@@ -31,6 +31,10 @@ https://github.com/user-attachments/assets/90acd659-e195-446f-aeab-e5349ae84fd7
 ### Fixed
 - **Descriptions are fetched in your language.** PlayGif was always pulling English from Steam, which replaced localized descriptions with English text. It now uses your Playnite language, and caches each language separately.
 
+### Added
+- **Convert cached media to MP4.** Re-encodes your cached GIFs with FFmpeg. A GIF stores every frame as a full picture, so the saving is large — a 116 MB test library came out around 8 MB — and MP4 plays using your GPU where GIF does not. In **Settings → General → Cache**.
+- **Repair description links**, next to it. Points descriptions at the converted files, and clears links whose media is no longer on disk. Runs automatically after converting.
+
 ### Fix attempts
 - **Descriptions reverting to plain text after restarting Playnite.** PlayGif could give up trying to attach before Playnite had finished building the description panel, so you had to click through every game again. It now keeps waiting and attaches as soon as the panel appears.
   - Marked a *fix attempt* because it depends on startup timing that varies by machine, theme, and library size. If it still happens, please [open an issue](https://github.com/aHuddini/PlayGif/issues) with your log — see the Known Issues tab in settings.
@@ -57,7 +61,7 @@ https://github.com/user-attachments/assets/90acd659-e195-446f-aeab-e5349ae84fd7
 - **Playnite 10** (SDK 6.16.0)
 - **Windows 10 (2004 / May 2020 update) or newer**, or Windows 11
 - **WebView2 Evergreen Runtime** — pre-installed on Windows 11 and most Windows 10 machines. If missing, get it from [Microsoft](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)
-- **FFmpeg** *(optional)* — only used to convert the rare video that a store publishes exclusively as WebM. Without it, those clips still play.
+- **FFmpeg** *(optional)* — needed for **Convert cached media to MP4**, and used to convert the rare video a store publishes exclusively as WebM. Everything still plays without it.
 
 ---
 
@@ -82,7 +86,13 @@ Right-click any game for the **PlayGif** menu:
 | **Video scale** | Set 25/50/75% for this game, or reset to the global default |
 | **Fetch description** | Pull a rich description from Steam or GOG |
 
-Library-wide options live in **Settings → PlayGif**, including the bulk Steam fetch.
+Library-wide options live in **Settings → PlayGif → General**:
+
+| Setting | What it does |
+|---|---|
+| **Fetch Steam descriptions for all games** | Bulk-fetches rich descriptions across your library |
+| **Convert cached media to MP4** | Re-encodes cached GIFs and other animations with FFmpeg — much smaller, and hardware-decoded |
+| **Repair description links** | Points descriptions at converted files, and clears links whose media is gone. Runs automatically after converting |
 
 If descriptions do not render correctly in your theme, open **Settings → PlayGif → Theme Support** and run the layout report — it records what PlayGif found in your theme's panel, which is what a bug report needs.
 

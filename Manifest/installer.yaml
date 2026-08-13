@@ -7,6 +7,8 @@ Packages:
     Changelog:
       - '[Fixed] Steam and GOG descriptions are now fetched in your Playnite language instead of always English (issue #1). Cached descriptions are stored per language, so switching language re-fetches rather than reusing the English copy.'
       - '[Fix Attempt] Descriptions reverting to Playnite''s static text after a restart, needing every game clicked again (issue #2). Injection retries were capped and could be exhausted during startup before the description panel existed; the cap is gone and PlayGif now attaches the moment the panel appears. Depends on startup timing, so please report if it still happens.'
+      - '[New Feature] Convert cached media to MP4: re-encodes cached GIFs and other animations with FFmpeg. A GIF stores every frame as a full image, so the saving is large - a 116 MB test library converted to roughly 8 MB - and MP4 is hardware-decoded where GIF is not. In Settings, General, Cache.'
+      - '[New Feature] Repair description links: re-points descriptions at converted files, and clears links whose media is no longer on disk. Runs automatically after a conversion.'
       - '[Improved] Log output during startup is quieter while waiting for the description panel.'
   - Version: 1.0.1
     RequiredApiVersion: 6.16.0
