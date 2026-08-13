@@ -27,11 +27,22 @@ namespace PlayGif.Services
         private const int RetryDelayMs = 2500;
 
         private readonly string _cacheBasePath;
+        private readonly Func<string> _languageProvider;
 
-        public SteamDescriptionService(string pluginDataPath)
+        public SteamDescriptionService(string pluginDataPath, Func<string> languageProvider = null)
         {
             _cacheBasePath = Path.Combine(pluginDataPath, Constants.GamesCacheFolder);
             Directory.CreateDirectory(_cacheBasePath);
+            _languageProvider = languageProvider;
+        }
+
+        // Steam's store API returns English unless told otherwise, which would
+        // overwrite a user's localized description. Null means "omit the
+        // parameter", which is correct for English and for anything unmapped.
+        private string SteamLanguageCode()
+        {
+            try { return SteamLanguage.FromPlayniteLanguage(_languageProvider?.Invoke()); }
+            catch { return null; }
         }
 
         public async Task<string> GetRichDescriptionAsync(Game game)
@@ -164,7 +175,9 @@ namespace PlayGif.Services
             {
                 try
                 {
-                    var url = $"https://store.steampowered.com/api/appdetails?appids={appId}";
+                    var lang = SteamLanguageCode();
+                    var url = $"https://store.steampowered.com/api/appdetails?appids={appId}"
+                        + (lang != null ? $"&l={lang}" : "");
                     var response = await HttpClient.GetAsync(url);
 
                     if (response.StatusCode == (HttpStatusCode)429)
@@ -242,7 +255,11 @@ namespace PlayGif.Services
 
             try
             {
-                var url = $"https://api.gog.com/products/{productId}?expand=description";
+                // GOG takes a BCP-47 locale ("de-DE"), unlike Steam's own naming
+                var locale = _languageProvider?.Invoke();
+                var localeParam = string.IsNullOrWhiteSpace(locale) || locale == "english"
+                    ? "" : $"&locale={locale.Replace('_', '-')}";
+                var url = $"https://api.gog.com/products/{productId}?expand=description{localeParam}";
                 var response = await HttpClient.GetStringAsync(url);
 
                 var json = JObject.Parse(response);
@@ -270,10 +287,15 @@ namespace PlayGif.Services
 
         #region Cache
 
+        // Descriptions are language-specific, so the cache has to be too. English
+        // keeps the original unsuffixed name so existing caches stay valid and
+        // are not re-downloaded; other languages get their own file.
         private string GetDescriptionCachePath(Guid gameId)
         {
             var gameDir = Path.Combine(_cacheBasePath, gameId.ToString());
-            return Path.Combine(gameDir, "_description.html");
+            var lang = SteamLanguageCode();
+            return Path.Combine(gameDir,
+                lang == null ? "_description.html" : $"_description.{lang}.html");
         }
 
         private string LoadCachedDescription(Guid gameId)
@@ -306,6 +328,20 @@ namespace PlayGif.Services
                 else
                     html = html + "\n" + tag;
                 File.WriteAllText(path, html);
+            }
+        }
+
+        // Clears every cached language, not just the active one, so "Refresh
+        // description" genuinely refetches after a language change.
+        public void ClearAllCachedDescriptions(Guid gameId)
+        {
+            var gameDir = Path.Combine(_cacheBasePath, gameId.ToString());
+            if (!Directory.Exists(gameDir)) return;
+
+            foreach (var f in Directory.GetFiles(gameDir, "_description*.html"))
+            {
+                try { File.Delete(f); }
+                catch (Exception ex) { Logger.Error(ex, $"Failed to delete {f}"); }
             }
         }
 

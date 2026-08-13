@@ -23,6 +23,16 @@ namespace PlayGif
             vm.BulkFetchSteamDescriptions();
         }
 
+        private void ConvertToMp4Button_Click(object sender, RoutedEventArgs e)
+        {
+            (DataContext as PlayGifSettingsViewModel)?.ConvertAllToMp4();
+        }
+
+        private void RepairLinksButton_Click(object sender, RoutedEventArgs e)
+        {
+            (DataContext as PlayGifSettingsViewModel)?.RepairDescriptionLinks();
+        }
+
         private void DiagnosticsButton_Click(object sender, RoutedEventArgs e)
         {
             (DataContext as PlayGifSettingsViewModel)?.RunLayoutReport();

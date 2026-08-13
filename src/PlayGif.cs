@@ -73,7 +73,7 @@ namespace PlayGif
                 Logger.Info($"Plugin data path: {basePath}");
 
                 _cacheService = new MediaCacheService(Settings, basePath);
-                _steamService = new SteamDescriptionService(basePath);
+                _steamService = new SteamDescriptionService(basePath, () => _api.ApplicationSettings.Language);
                 _renderer = new DescriptionRendererService(Settings, () => basePath);
 
                 // Create the environment (doesn't need visual tree)
@@ -101,6 +101,21 @@ namespace PlayGif
                             if (!_viewMonitor.IsStale()) return;
                             _viewMonitor.Detach();
                             _injectionAttempts = 0;
+                            TryInjectAndRender(_lastSelectedGame);
+                        }));
+                };
+
+                // Playnite builds Grid view's details panel on demand, so at
+                // startup there is often nothing to inject into. Inject as soon
+                // as the element actually appears (issue #2).
+                _viewMonitor.DescriptionAppeared += () =>
+                {
+                    Application.Current.Dispatcher.BeginInvoke(
+                        DispatcherPriority.Loaded,
+                        new Action(() =>
+                        {
+                            if (_viewMonitor.IsInjected) return;
+                            if (_lastSelectedGame == null) return;
                             TryInjectAndRender(_lastSelectedGame);
                         }));
                 };
@@ -209,11 +224,17 @@ namespace PlayGif
                     _injectionAttempts = 0;
                 }
 
-                // Step 1: Inject into visual tree if not already done
-                if (!_viewMonitor.IsInjected && _injectionAttempts < 5)
+                // Step 1: Inject into visual tree if not already done.
+                // No attempt cap: Playnite creates Grid view's details panel on
+                // demand, so at startup the element may not exist for a while.
+                // A capped retry burns its whole budget in milliseconds and then
+                // blocks injection for the rest of the session (issue #2).
+                // DescriptionAppeared re-drives this the moment the element shows up.
+                if (!_viewMonitor.IsInjected)
                 {
                     _injectionAttempts++;
-                    Logger.Info($"Attempting visual tree injection (attempt {_injectionAttempts})...");
+                    if (_injectionAttempts <= 3 || _injectionAttempts % 25 == 0)
+                        Logger.Info($"Attempting visual tree injection (attempt {_injectionAttempts})...");
                     _viewMonitor.TryInject(Application.Current.MainWindow, _renderer.WebViewControl);
 
                     if (_viewMonitor.IsInjected)
@@ -285,7 +306,11 @@ namespace PlayGif
                     }
                     else
                     {
-                        Logger.Info("Injection failed — PART_HtmlDescription not found yet.");
+                        // Expected while the description panel does not exist yet.
+                        // Throttled: this runs on every game selection until the
+                        // panel appears, and the log is shared with every extension.
+                        if (_injectionAttempts <= 3 || _injectionAttempts % 25 == 0)
+                            Logger.Info("Injection failed — description element not in the tree yet.");
                         return;
                     }
                 }
@@ -454,6 +479,315 @@ namespace PlayGif
                 _api.Dialogs.ShowMessage($"Failed to copy file: {ex.Message}", Constants.PluginName);
                 return null;
             }
+        }
+
+        // Called from the Performance settings tab. Re-encodes cached GIF/WebM/
+        // animated WebP to H.264 MP4, which decodes far more cheaply and is
+        // dramatically smaller — a GIF carries every frame as a full image.
+        public void RunBulkMp4Conversion()
+        {
+            if (_cacheService == null)
+            {
+                _api.Dialogs.ShowMessage(
+                    "PlayGif is still starting up. Try again in a moment.",
+                    Constants.PluginName);
+                return;
+            }
+
+            if (!_cacheService.IsFfmpegAvailable())
+            {
+                _api.Dialogs.ShowMessage(
+                    "FFmpeg was not found.\n\n" +
+                    "Install FFmpeg and make sure it is on your PATH, or set its location " +
+                    "in Settings -> Advanced -> FFmpeg path.",
+                    Constants.PluginName);
+                return;
+            }
+
+            var files = _cacheService.FindConvertibleMedia();
+            if (files.Count == 0)
+            {
+                _api.Dialogs.ShowMessage(
+                    "Nothing to convert — all cached media is already MP4.",
+                    Constants.PluginName);
+                return;
+            }
+
+            var totalMb = files.Sum(f => new System.IO.FileInfo(f).Length) / 1048576.0;
+            var confirm = _api.Dialogs.ShowMessage(
+                $"Convert {files.Count} cached file(s) to MP4?\n\n" +
+                $"Current size: {totalMb:F0} MB\n\n" +
+                "Originals are deleted once each conversion succeeds. Descriptions " +
+                "keep working — they switch to the MP4 automatically.\n\n" +
+                "This can take a while for large libraries.",
+                Constants.PluginName,
+                MessageBoxButton.YesNo);
+
+            if (confirm != MessageBoxResult.Yes) return;
+
+            var converted = 0;
+            var failed = 0;
+            long before = 0, after = 0;
+
+            _api.Dialogs.ActivateGlobalProgress((progressArgs) =>
+            {
+                progressArgs.ProgressMaxValue = files.Count;
+
+                for (int i = 0; i < files.Count; i++)
+                {
+                    if (progressArgs.CancelToken.IsCancellationRequested) break;
+
+                    var file = files[i];
+                    progressArgs.Text =
+                        $"Converting {System.IO.Path.GetFileName(file)} ({i + 1}/{files.Count})";
+
+                    var size = new System.IO.FileInfo(file).Length;
+
+                    if (_cacheService.ConvertToMp4(file))
+                    {
+                        var mp4 = System.IO.Path.ChangeExtension(file, ".mp4");
+                        before += size;
+                        after += new System.IO.FileInfo(mp4).Length;
+                        // Only remove the original once the MP4 is confirmed on disk
+                        try { System.IO.File.Delete(file); } catch { }
+                        converted++;
+                    }
+                    else
+                    {
+                        failed++;
+                    }
+
+                    progressArgs.CurrentProgressValue = i + 1;
+                }
+            }, new GlobalProgressOptions($"Converting media to MP4 (0/{files.Count})...", true)
+            {
+                IsIndeterminate = false
+            });
+
+            // Descriptions still point at the originals we just replaced, so repair
+            // them rather than leaving broken references behind.
+            var repairedCache = _cacheService.RepairDescriptionsOnDisk();
+            var (repointed, removed) = RepairStoredDescriptions();
+            var updated = repairedCache + repointed;
+
+            var savedMb = (before - after) / 1048576.0;
+            _api.Dialogs.ShowMessage(
+                $"Converted: {converted}\n" +
+                (failed > 0 ? $"Failed: {failed}\n" : "") +
+                (converted > 0 ? $"\nDisk saved: {savedMb:F0} MB" : "") +
+                (updated > 0 ? $"\nDescription links updated: {updated}" : "") +
+                (removed > 0 ? $"\nDead links removed: {removed}" : ""),
+                Constants.PluginName);
+
+            if (_lastSelectedGame != null) TryInjectAndRender(_lastSelectedGame);
+        }
+
+        // Media the user added is written into the game's Playnite description as a
+        // playgif.local URL. Two things can invalidate it: conversion replaces the
+        // file with an MP4, or the cache is cleared and the file is gone entirely.
+        // The first is re-pointed; the second has nothing to point at, so the dead
+        // tag is removed rather than left rendering a broken image.
+        private (int repointed, int removed) RepairStoredDescriptions()
+        {
+            var repointed = 0;
+            var removed = 0;
+            var basePath = System.IO.Path.Combine(
+                GetPluginUserDataPath(), Common.Constants.GamesCacheFolder);
+
+            foreach (var game in _api.Database.Games)
+            {
+                var desc = game.Description;
+                if (string.IsNullOrEmpty(desc)) continue;
+                if (desc.IndexOf(Constants.VirtualHostName, StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                var gameDir = System.IO.Path.Combine(basePath, game.Id.ToString());
+                var updated = desc;
+
+                // Re-point anything that was converted
+                if (System.IO.Directory.Exists(gameDir))
+                {
+                    updated = RepointConvertedMedia(updated, game.Id, gameDir, out var fixedCount);
+                    repointed += fixedCount;
+                }
+
+                // Drop tags whose file is gone with no replacement — clearing the
+                // cache removes the media but leaves the description pointing at it
+                var stripped = StripDeadLocalMedia(updated, game.Id, gameDir, out var n);
+                if (n > 0) { updated = stripped; removed += n; }
+
+                if (updated != desc)
+                {
+                    game.Description = updated;
+                    _api.Database.Games.Update(game);
+                }
+            }
+
+            if (repointed > 0) Logger.Info($"Re-pointed {repointed} converted media reference(s).");
+            if (removed > 0) Logger.Info($"Removed {removed} dead media reference(s).");
+            return (repointed, removed);
+        }
+
+        // Re-points converted media and, critically, turns the <img> into a <video>.
+        // A plain string replace of the filename leaves <img src="...mp4">, which
+        // never renders — the element type has to change with the extension.
+        private static string RepointConvertedMedia(string html, Guid gameId, string gameDir, out int changed)
+        {
+            changed = 0;
+            try
+            {
+                var doc = new HtmlAgilityPack.HtmlDocument();
+                doc.LoadHtml(html);
+
+                var imgs = doc.DocumentNode.SelectNodes("//img[@src]")
+                    ?? Enumerable.Empty<HtmlAgilityPack.HtmlNode>();
+
+                foreach (var img in imgs.ToList())
+                {
+                    var src = img.GetAttributeValue("src", "");
+                    if (src.IndexOf(Constants.VirtualHostName, StringComparison.OrdinalIgnoreCase) < 0)
+                        continue;
+
+                    var fileName = src.Split('?')[0].Split('/').Last();
+                    if (string.IsNullOrEmpty(fileName)) continue;
+
+                    var ext = System.IO.Path.GetExtension(fileName).ToLowerInvariant();
+                    var stem = System.IO.Path.GetFileNameWithoutExtension(fileName);
+                    var mp4Name = stem + ".mp4";
+                    var mp4OnDisk = System.IO.File.Exists(System.IO.Path.Combine(gameDir, mp4Name));
+
+                    // Two shapes land here: an <img> still naming the original
+                    // (converted, file gone), and an <img> already naming the MP4
+                    // (an earlier string-replace repair that only swapped the name).
+                    var wasConverted = ext != ".mp4"
+                        && !System.IO.File.Exists(System.IO.Path.Combine(gameDir, fileName));
+                    if (!(mp4OnDisk && (wasConverted || ext == ".mp4"))) continue;
+
+                    var video = doc.CreateElement("video");
+                    video.SetAttributeValue("autoplay", "");
+                    video.SetAttributeValue("muted", "");
+                    video.SetAttributeValue("loop", "");
+                    video.SetAttributeValue("playsinline", "");
+                    video.SetAttributeValue("style", "max-width:100%;height:auto;display:block;");
+
+                    var source = doc.CreateElement("source");
+                    source.SetAttributeValue("src",
+                        $"https://{Constants.VirtualHostName}/{gameId}/{mp4Name}");
+                    source.SetAttributeValue("type", "video/mp4");
+                    video.AppendChild(source);
+
+                    img.ParentNode.ReplaceChild(video, img);
+                    changed++;
+                }
+
+                // Non-img references only need the filename updated
+                foreach (var node in doc.DocumentNode.SelectNodes("//source[@src] | //video[@src]")
+                    ?? Enumerable.Empty<HtmlAgilityPack.HtmlNode>())
+                {
+                    var src = node.GetAttributeValue("src", "");
+                    if (src.IndexOf(Constants.VirtualHostName, StringComparison.OrdinalIgnoreCase) < 0)
+                        continue;
+
+                    var fileName = src.Split('?')[0].Split('/').Last();
+                    var ext = System.IO.Path.GetExtension(fileName).ToLowerInvariant();
+                    if (ext == ".mp4") continue;
+                    if (System.IO.File.Exists(System.IO.Path.Combine(gameDir, fileName))) continue;
+
+                    var mp4Name = System.IO.Path.GetFileNameWithoutExtension(fileName) + ".mp4";
+                    if (!System.IO.File.Exists(System.IO.Path.Combine(gameDir, mp4Name))) continue;
+
+                    node.SetAttributeValue("src",
+                        $"https://{Constants.VirtualHostName}/{gameId}/{mp4Name}");
+                    if (node.Name == "source") node.SetAttributeValue("type", "video/mp4");
+                    changed++;
+                }
+
+                return changed > 0 ? doc.DocumentNode.OuterHtml : html;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, $"Failed to re-point converted media for game {gameId}");
+                changed = 0;
+                return html;
+            }
+        }
+
+        // Removes img/video tags whose playgif.local file no longer exists
+        private static string StripDeadLocalMedia(string html, Guid gameId, string gameDir, out int removed)
+        {
+            removed = 0;
+            try
+            {
+                var doc = new HtmlAgilityPack.HtmlDocument();
+                doc.LoadHtml(html);
+
+                var dead = new List<HtmlAgilityPack.HtmlNode>();
+
+                foreach (var node in doc.DocumentNode
+                    .SelectNodes("//img[@src] | //source[@src] | //video[@src]")
+                    ?? Enumerable.Empty<HtmlAgilityPack.HtmlNode>())
+                {
+                    var src = node.GetAttributeValue("src", "");
+                    if (src.IndexOf(Constants.VirtualHostName, StringComparison.OrdinalIgnoreCase) < 0)
+                        continue;
+
+                    var fileName = src.Split('?')[0].Split('/').Last();
+                    if (string.IsNullOrEmpty(fileName)) continue;
+                    if (System.IO.File.Exists(System.IO.Path.Combine(gameDir, fileName))) continue;
+
+                    // Remove the whole <video> rather than orphaning an empty shell
+                    var target = node.ParentNode?.Name == "video" ? node.ParentNode : node;
+                    if (!dead.Contains(target)) dead.Add(target);
+                }
+
+                if (dead.Count == 0) return html;
+
+                foreach (var n in dead) n.ParentNode?.RemoveChild(n);
+                removed = dead.Count;
+                return doc.DocumentNode.OuterHtml;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, $"Failed to strip dead media for game {gameId}");
+                removed = 0;
+                return html;
+            }
+        }
+
+        // Standalone repair for users who converted before this existed, or whose
+        // descriptions reference media that is no longer on disk.
+        public void RunDescriptionRepair()
+        {
+            if (_cacheService == null)
+            {
+                _api.Dialogs.ShowMessage(
+                    "PlayGif is still starting up. Try again in a moment.",
+                    Constants.PluginName);
+                return;
+            }
+
+            var repairedCache = _cacheService.RepairDescriptionsOnDisk();
+            var (repointed, removed) = RepairStoredDescriptions();
+            var updated = repairedCache + repointed;
+
+            if (updated == 0 && removed == 0)
+            {
+                _api.Dialogs.ShowMessage(
+                    "No broken media links found — descriptions already point at the right files.",
+                    Constants.PluginName);
+            }
+            else
+            {
+                _api.Dialogs.ShowMessage(
+                    (updated > 0 ? $"Re-pointed {updated} link(s) at converted MP4 files.\n" : "") +
+                    (removed > 0
+                        ? $"Removed {removed} link(s) whose media is no longer on disk.\n\n" +
+                          "Those files were deleted from the cache, so there was nothing left to " +
+                          "show. Re-add the media if you still want it."
+                        : ""),
+                    Constants.PluginName);
+            }
+
+            if (_lastSelectedGame != null) TryInjectAndRender(_lastSelectedGame);
         }
 
         // Called from the Theme Support settings tab
@@ -707,7 +1041,7 @@ namespace PlayGif
             if (_steamService == null)
             {
                 var basePath = GetPluginUserDataPath();
-                _steamService = new SteamDescriptionService(basePath);
+                _steamService = new SteamDescriptionService(basePath, () => _api.ApplicationSettings.Language);
             }
 
             foreach (var game in games)
@@ -986,7 +1320,7 @@ namespace PlayGif
                     foreach (var game in menuArgs.Games)
                     {
                         _cacheService.ClearGameCache(game.Id);
-                        _steamService?.ClearCachedDescription(game.Id);
+                        _steamService?.ClearAllCachedDescriptions(game.Id);
                     }
                     if (_renderer?.IsInitialized == true && _lastSelectedGame != null)
                         TryInjectAndRender(_lastSelectedGame);
@@ -1099,7 +1433,7 @@ namespace PlayGif
             {
                 // Service not initialized yet — create a temporary one for the fetch
                 var basePath = GetPluginUserDataPath();
-                _steamService = new SteamDescriptionService(basePath);
+                _steamService = new SteamDescriptionService(basePath, () => _api.ApplicationSettings.Language);
             }
 
             var allGames = _api.Database.Games.ToList();

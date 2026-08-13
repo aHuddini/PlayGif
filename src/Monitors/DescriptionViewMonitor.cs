@@ -19,6 +19,7 @@ namespace PlayGif.Monitors
         private bool _isHooked;
         private bool _loggedMissing;
         private FrameworkElement _hiddenHtmlTextView;
+        private FrameworkElement _lastSignalledElement;
         private object _injectionTarget;
         private ScrollViewer _parentScrollViewer;
         private HwndClipper _clipper;
@@ -49,6 +50,11 @@ namespace PlayGif.Monitors
         // change), so the host can re-inject without waiting for a game selection.
         public event Action InjectionLost;
 
+        // Raised when a description element appears in the tree while we are not
+        // injected. Playnite builds Grid view's details panel lazily, so at startup
+        // the element often does not exist yet and there is nothing to inject into.
+        public event Action DescriptionAppeared;
+
         public void StartMonitoring()
         {
             if (_isHooked) return;
@@ -56,13 +62,41 @@ namespace PlayGif.Monitors
                 FrameworkElement.LoadedEvent,
                 new RoutedEventHandler(OnWindowLoaded));
 
-            // A theme's description element can also appear late — FusionX nests it
-            // in a lazily-realized TabItem — so watch for HtmlTextView loading too.
+            // The description element can appear long after startup: Playnite
+            // creates the Grid view details panel on demand, and themes may nest
+            // it in a lazily-realized TabItem. Watch both directions.
+            EventManager.RegisterClassHandler(typeof(FrameworkElement),
+                FrameworkElement.LoadedEvent,
+                new RoutedEventHandler(OnElementLoaded));
+
             EventManager.RegisterClassHandler(typeof(FrameworkElement),
                 FrameworkElement.UnloadedEvent,
                 new RoutedEventHandler(OnElementUnloaded));
 
             _isHooked = true;
+        }
+
+        private void OnElementLoaded(object sender, RoutedEventArgs e)
+        {
+            // Cheap rejection first — this fires for every element in the app
+            if (_hiddenHtmlTextView != null) return;
+            if (!(sender is FrameworkElement fe)) return;
+
+            var name = fe.Name;
+            if (string.IsNullOrEmpty(name)) return;
+            if (name != Constants.HtmlDescriptionPartName &&
+                name != Constants.DescriptionPanelPartName) return;
+
+            if (!_isEnabled()) return;
+
+            // WPF re-raises Loaded when an element is re-parented, and both the
+            // panel and the text view match, so the same arrival can fire several
+            // times. Only signal for the first one until injection settles.
+            if (ReferenceEquals(fe, _lastSignalledElement)) return;
+            _lastSignalledElement = fe;
+
+            Logger.Info($"Description element '{name}' appeared — signalling injection.");
+            DescriptionAppeared?.Invoke();
         }
 
         private void OnElementUnloaded(object sender, RoutedEventArgs e)
@@ -173,6 +207,10 @@ namespace PlayGif.Monitors
             _injectionTarget = null;
             _parentScrollViewer = null;
             _loggedMissing = false;
+
+            // Allow the next arrival to signal again, otherwise re-injection after
+            // a view switch would be suppressed by the duplicate guard.
+            _lastSignalledElement = null;
         }
 
         public void TryInject(DependencyObject root, WebView2 webView)
