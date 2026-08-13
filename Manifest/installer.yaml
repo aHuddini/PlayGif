@@ -1,5 +1,13 @@
 AddonId: 'PlayGif.2e196d25-24d1-4db3-b732-9766c994a496'
 Packages:
+  - Version: 1.0.2
+    RequiredApiVersion: 6.16.0
+    ReleaseDate: 2026-08-03
+    PackageUrl: 'https://github.com/aHuddini/PlayGif/releases/download/1.0.2/PlayGif-1_0_2.pext'
+    Changelog:
+      - '[Fixed] Steam and GOG descriptions are now fetched in your Playnite language instead of always English (issue #1). Cached descriptions are stored per language, so switching language re-fetches rather than reusing the English copy.'
+      - '[Fix Attempt] Descriptions reverting to Playnite''s static text after a restart, needing every game clicked again (issue #2). Injection retries were capped and could be exhausted during startup before the description panel existed; the cap is gone and PlayGif now attaches the moment the panel appears. Depends on startup timing, so please report if it still happens.'
+      - '[Improved] Log output during startup is quieter while waiting for the description panel.'
   - Version: 1.0.1
     RequiredApiVersion: 6.16.0
     ReleaseDate: 2026-07-26

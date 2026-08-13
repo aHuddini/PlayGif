@@ -2,6 +2,25 @@
 
 All notable changes to PlayGif will be documented in this file.
 
+## [1.0.2] - 2026-08-03
+
+### Fixed
+- **Store descriptions are fetched in the user's language** ([#1](https://github.com/aHuddini/PlayGif/issues/1)). The Steam API returns English unless given `&l=<language>`, so PlayGif was overwriting localized descriptions with English text. Playnite's locale is now mapped to Steam's store API names via `Common/SteamLanguage.cs`.
+  - Steam's naming is irregular — `koreana` not `korean`, `brazilian`, `schinese`, `tchinese`, `latam` — and an unrecognised value silently falls back to English, which is the failure being fixed. Every code in the table was verified against the live API.
+  - GOG takes a BCP-47 locale (`de-DE`) instead, so `FetchGogDescriptionAsync` sends that.
+  - Cached descriptions are language-specific. English keeps the original `_description.html` name so existing caches stay valid and are not re-downloaded; other languages get `_description.<lang>.html`.
+  - `ClearAllCachedDescriptions` removes every language, so "Refresh description" genuinely refetches after a language change, and `MediaLibraryHandler` strips removed media from every cached language.
+  - Unknown or English locales omit the parameter entirely, preserving existing behaviour.
+
+### Fix attempts
+- **Descriptions reverting to static text after a restart** ([#2](https://github.com/aHuddini/PlayGif/issues/2)). Injection attempts were capped at 5 on the assumption that retries are spread across user actions. They are not — Playnite fires several `OnGameSelected` events during startup, so in the reporter's log all attempts burned inside 27ms, before Grid view's details panel had been built (`[PART_HtmlDescription] found 0`). Across that log, 18 of 48 sessions never injected and 5 exhausted the cap.
+  - The cap is removed, and a `Loaded` class handler raises `DescriptionAppeared` when a description element enters the tree while not injected, so injection happens as soon as the panel is built. This mirrors the existing `Unloaded` handler, making both directions event-driven.
+  - Marked a fix attempt because it depends on live startup timing and cannot be reproduced or confirmed outside a real Playnite session.
+
+### Changed
+- Injection attempt logging is throttled. It now runs on every game selection until the panel appears, and `extension.log` is shared with every extension.
+- The `Loaded` handler sees every element in the application, so its guards are ordered cheapest-first, duplicate events for the same element are ignored (WPF re-raises `Loaded` on re-parenting), and the guard resets in `Detach` so re-injection after a view switch still works.
+
 ## [1.0.1] - 2026-07-26
 
 ### Fixed

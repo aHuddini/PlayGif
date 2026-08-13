@@ -26,19 +26,17 @@ Built with the help of Claude Code
 
 https://github.com/user-attachments/assets/90acd659-e195-446f-aeab-e5349ae84fd7
 
-## What's New - v1.0.1
+## What's New - v1.0.2
 
 ### Fixed
-- **Descriptions keep animating when you switch views.** Moving between Grid and Details used to leave the description static until Playnite was restarted.
-- **Grid view animates properly.** In Grid view the description could stay static while the animated version rendered out of sight.
+- **Descriptions are fetched in your language.** PlayGif was always pulling English from Steam, which replaced localized descriptions with English text. It now uses your Playnite language, and caches each language separately.
 
-### Added
-- **Video scale dropdown** (100/90/75/50/35/25%). Lowering it is the simplest way to reduce playback cost on slower machines.
-- **Theme Support settings tab.** If descriptions do not animate correctly in your theme, run the layout report and attach it to a bug report.
-- **Open debug log folder** — finds `extension.log` for you.
+### Fix attempts
+- **Descriptions reverting to plain text after restarting Playnite.** PlayGif could give up trying to attach before Playnite had finished building the description panel, so you had to click through every game again. It now keeps waiting and attaches as soon as the panel appears.
+  - Marked a *fix attempt* because it depends on startup timing that varies by machine, theme, and library size. If it still happens, please [open an issue](https://github.com/aHuddini/PlayGif/issues) with your log — see the Known Issues tab in settings.
 
 ### Previous Version
-- **v1.0.0**: first release — animated descriptions, Steam/GOG description fetching, custom media, per-game video scale, and offline caching.
+- **v1.0.1**: fixed descriptions going static when switching between Grid and Details view, added the video scale dropdown, and added the Theme Support and Known Issues settings tabs.
 
 ---
 

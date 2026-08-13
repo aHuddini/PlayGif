@@ -127,6 +127,12 @@
                     <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="12,0,0,12"
                                Text="- Fullscreen mode is experimental and disabled by default"/>
 
+                    <TextBlock Text="Under investigation" FontWeight="SemiBold" Margin="0,4,0,6"/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,0,0,4"
+                               Text="Some fixes depend on timing that varies by machine, theme and library size, so they ship as attempts rather than confirmed fixes. If one of these still happens, a report with a log is what makes it fixable."/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="12,0,0,12"
+                               Text="- 1.0.2: descriptions reverting to plain text after restarting Playnite (issue #2)"/>
+
                     <TextBlock Text="Reporting a problem" FontWeight="SemiBold" Margin="0,4,0,6"/>
                     <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,0,0,6"
                                Text="Reports are welcome. Some theme layouts may be out of reach, but a report helps identify which ones. Include:"/>
