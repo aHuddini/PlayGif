@@ -567,26 +567,30 @@ namespace PlayGif
             // Descriptions still point at the originals we just replaced, so repair
             // them rather than leaving broken references behind.
             var repairedCache = _cacheService.RepairDescriptionsOnDisk();
-            var repairedDb = RepairStoredDescriptions();
+            var (repointed, removed) = RepairStoredDescriptions();
+            var updated = repairedCache + repointed;
 
             var savedMb = (before - after) / 1048576.0;
             _api.Dialogs.ShowMessage(
                 $"Converted: {converted}\n" +
                 (failed > 0 ? $"Failed: {failed}\n" : "") +
                 (converted > 0 ? $"\nDisk saved: {savedMb:F0} MB" : "") +
-                (repairedCache + repairedDb > 0
-                    ? $"\nDescription links updated: {repairedCache + repairedDb}" : ""),
+                (updated > 0 ? $"\nDescription links updated: {updated}" : "") +
+                (removed > 0 ? $"\nDead links removed: {removed}" : ""),
                 Constants.PluginName);
 
             if (_lastSelectedGame != null) TryInjectAndRender(_lastSelectedGame);
         }
 
         // Media the user added is written into the game's Playnite description as a
-        // playgif.local URL. After conversion that filename no longer exists, so the
-        // stored description needs the same repair as the cached one.
-        private int RepairStoredDescriptions()
+        // playgif.local URL. Two things can invalidate it: conversion replaces the
+        // file with an MP4, or the cache is cleared and the file is gone entirely.
+        // The first is re-pointed; the second has nothing to point at, so the dead
+        // tag is removed rather than left rendering a broken image.
+        private (int repointed, int removed) RepairStoredDescriptions()
         {
-            var total = 0;
+            var repointed = 0;
+            var removed = 0;
             var basePath = System.IO.Path.Combine(
                 GetPluginUserDataPath(), Common.Constants.GamesCacheFolder);
 
@@ -597,22 +601,30 @@ namespace PlayGif
                 if (desc.IndexOf(Constants.VirtualHostName, StringComparison.OrdinalIgnoreCase) < 0) continue;
 
                 var gameDir = System.IO.Path.Combine(basePath, game.Id.ToString());
-                if (!System.IO.Directory.Exists(gameDir)) continue;
-
                 var updated = desc;
-                foreach (var mp4 in System.IO.Directory.GetFiles(gameDir, "*.mp4"))
-                {
-                    var stem = System.IO.Path.GetFileNameWithoutExtension(mp4);
-                    foreach (var ext in new[] { ".gif", ".webm", ".apng", ".webp" })
-                    {
-                        var original = stem + ext;
-                        if (System.IO.File.Exists(System.IO.Path.Combine(gameDir, original))) continue;
-                        if (updated.IndexOf(original, StringComparison.OrdinalIgnoreCase) < 0) continue;
 
-                        updated = updated.Replace(original, stem + ".mp4");
-                        total++;
+                // Re-point anything that was converted
+                if (System.IO.Directory.Exists(gameDir))
+                {
+                    foreach (var mp4 in System.IO.Directory.GetFiles(gameDir, "*.mp4"))
+                    {
+                        var stem = System.IO.Path.GetFileNameWithoutExtension(mp4);
+                        foreach (var ext in new[] { ".gif", ".webm", ".apng", ".webp" })
+                        {
+                            var original = stem + ext;
+                            if (System.IO.File.Exists(System.IO.Path.Combine(gameDir, original))) continue;
+                            if (updated.IndexOf(original, StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                            updated = updated.Replace(original, stem + ".mp4");
+                            repointed++;
+                        }
                     }
                 }
+
+                // Drop tags whose file is gone with no replacement — clearing the
+                // cache removes the media but leaves the description pointing at it
+                var stripped = StripDeadLocalMedia(updated, game.Id, gameDir, out var n);
+                if (n > 0) { updated = stripped; removed += n; }
 
                 if (updated != desc)
                 {
@@ -621,8 +633,51 @@ namespace PlayGif
                 }
             }
 
-            if (total > 0) Logger.Info($"Repaired {total} media reference(s) in stored descriptions.");
-            return total;
+            if (repointed > 0) Logger.Info($"Re-pointed {repointed} converted media reference(s).");
+            if (removed > 0) Logger.Info($"Removed {removed} dead media reference(s).");
+            return (repointed, removed);
+        }
+
+        // Removes img/video tags whose playgif.local file no longer exists
+        private static string StripDeadLocalMedia(string html, Guid gameId, string gameDir, out int removed)
+        {
+            removed = 0;
+            try
+            {
+                var doc = new HtmlAgilityPack.HtmlDocument();
+                doc.LoadHtml(html);
+
+                var dead = new List<HtmlAgilityPack.HtmlNode>();
+
+                foreach (var node in doc.DocumentNode
+                    .SelectNodes("//img[@src] | //source[@src] | //video[@src]")
+                    ?? Enumerable.Empty<HtmlAgilityPack.HtmlNode>())
+                {
+                    var src = node.GetAttributeValue("src", "");
+                    if (src.IndexOf(Constants.VirtualHostName, StringComparison.OrdinalIgnoreCase) < 0)
+                        continue;
+
+                    var fileName = src.Split('?')[0].Split('/').Last();
+                    if (string.IsNullOrEmpty(fileName)) continue;
+                    if (System.IO.File.Exists(System.IO.Path.Combine(gameDir, fileName))) continue;
+
+                    // Remove the whole <video> rather than orphaning an empty shell
+                    var target = node.ParentNode?.Name == "video" ? node.ParentNode : node;
+                    if (!dead.Contains(target)) dead.Add(target);
+                }
+
+                if (dead.Count == 0) return html;
+
+                foreach (var n in dead) n.ParentNode?.RemoveChild(n);
+                removed = dead.Count;
+                return doc.DocumentNode.OuterHtml;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, $"Failed to strip dead media for game {gameId}");
+                removed = 0;
+                return html;
+            }
         }
 
         // Standalone repair for users who converted before this existed, or whose
@@ -638,10 +693,10 @@ namespace PlayGif
             }
 
             var repairedCache = _cacheService.RepairDescriptionsOnDisk();
-            var repairedDb = RepairStoredDescriptions();
-            var total = repairedCache + repairedDb;
+            var (repointed, removed) = RepairStoredDescriptions();
+            var updated = repairedCache + repointed;
 
-            if (total == 0)
+            if (updated == 0 && removed == 0)
             {
                 _api.Dialogs.ShowMessage(
                     "No broken media links found — descriptions already point at the right files.",
@@ -650,7 +705,12 @@ namespace PlayGif
             else
             {
                 _api.Dialogs.ShowMessage(
-                    $"Updated {total} media link(s) to point at converted MP4 files.",
+                    (updated > 0 ? $"Re-pointed {updated} link(s) at converted MP4 files.\n" : "") +
+                    (removed > 0
+                        ? $"Removed {removed} link(s) whose media is no longer on disk.\n\n" +
+                          "Those files were deleted from the cache, so there was nothing left to " +
+                          "show. Re-add the media if you still want it."
+                        : ""),
                     Constants.PluginName);
             }
 
