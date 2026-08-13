@@ -606,19 +606,8 @@ namespace PlayGif
                 // Re-point anything that was converted
                 if (System.IO.Directory.Exists(gameDir))
                 {
-                    foreach (var mp4 in System.IO.Directory.GetFiles(gameDir, "*.mp4"))
-                    {
-                        var stem = System.IO.Path.GetFileNameWithoutExtension(mp4);
-                        foreach (var ext in new[] { ".gif", ".webm", ".apng", ".webp" })
-                        {
-                            var original = stem + ext;
-                            if (System.IO.File.Exists(System.IO.Path.Combine(gameDir, original))) continue;
-                            if (updated.IndexOf(original, StringComparison.OrdinalIgnoreCase) < 0) continue;
-
-                            updated = updated.Replace(original, stem + ".mp4");
-                            repointed++;
-                        }
-                    }
+                    updated = RepointConvertedMedia(updated, game.Id, gameDir, out var fixedCount);
+                    repointed += fixedCount;
                 }
 
                 // Drop tags whose file is gone with no replacement — clearing the
@@ -636,6 +625,90 @@ namespace PlayGif
             if (repointed > 0) Logger.Info($"Re-pointed {repointed} converted media reference(s).");
             if (removed > 0) Logger.Info($"Removed {removed} dead media reference(s).");
             return (repointed, removed);
+        }
+
+        // Re-points converted media and, critically, turns the <img> into a <video>.
+        // A plain string replace of the filename leaves <img src="...mp4">, which
+        // never renders — the element type has to change with the extension.
+        private static string RepointConvertedMedia(string html, Guid gameId, string gameDir, out int changed)
+        {
+            changed = 0;
+            try
+            {
+                var doc = new HtmlAgilityPack.HtmlDocument();
+                doc.LoadHtml(html);
+
+                var imgs = doc.DocumentNode.SelectNodes("//img[@src]")
+                    ?? Enumerable.Empty<HtmlAgilityPack.HtmlNode>();
+
+                foreach (var img in imgs.ToList())
+                {
+                    var src = img.GetAttributeValue("src", "");
+                    if (src.IndexOf(Constants.VirtualHostName, StringComparison.OrdinalIgnoreCase) < 0)
+                        continue;
+
+                    var fileName = src.Split('?')[0].Split('/').Last();
+                    if (string.IsNullOrEmpty(fileName)) continue;
+
+                    var ext = System.IO.Path.GetExtension(fileName).ToLowerInvariant();
+                    var stem = System.IO.Path.GetFileNameWithoutExtension(fileName);
+                    var mp4Name = stem + ".mp4";
+                    var mp4OnDisk = System.IO.File.Exists(System.IO.Path.Combine(gameDir, mp4Name));
+
+                    // Two shapes land here: an <img> still naming the original
+                    // (converted, file gone), and an <img> already naming the MP4
+                    // (an earlier string-replace repair that only swapped the name).
+                    var wasConverted = ext != ".mp4"
+                        && !System.IO.File.Exists(System.IO.Path.Combine(gameDir, fileName));
+                    if (!(mp4OnDisk && (wasConverted || ext == ".mp4"))) continue;
+
+                    var video = doc.CreateElement("video");
+                    video.SetAttributeValue("autoplay", "");
+                    video.SetAttributeValue("muted", "");
+                    video.SetAttributeValue("loop", "");
+                    video.SetAttributeValue("playsinline", "");
+                    video.SetAttributeValue("style", "max-width:100%;height:auto;display:block;");
+
+                    var source = doc.CreateElement("source");
+                    source.SetAttributeValue("src",
+                        $"https://{Constants.VirtualHostName}/{gameId}/{mp4Name}");
+                    source.SetAttributeValue("type", "video/mp4");
+                    video.AppendChild(source);
+
+                    img.ParentNode.ReplaceChild(video, img);
+                    changed++;
+                }
+
+                // Non-img references only need the filename updated
+                foreach (var node in doc.DocumentNode.SelectNodes("//source[@src] | //video[@src]")
+                    ?? Enumerable.Empty<HtmlAgilityPack.HtmlNode>())
+                {
+                    var src = node.GetAttributeValue("src", "");
+                    if (src.IndexOf(Constants.VirtualHostName, StringComparison.OrdinalIgnoreCase) < 0)
+                        continue;
+
+                    var fileName = src.Split('?')[0].Split('/').Last();
+                    var ext = System.IO.Path.GetExtension(fileName).ToLowerInvariant();
+                    if (ext == ".mp4") continue;
+                    if (System.IO.File.Exists(System.IO.Path.Combine(gameDir, fileName))) continue;
+
+                    var mp4Name = System.IO.Path.GetFileNameWithoutExtension(fileName) + ".mp4";
+                    if (!System.IO.File.Exists(System.IO.Path.Combine(gameDir, mp4Name))) continue;
+
+                    node.SetAttributeValue("src",
+                        $"https://{Constants.VirtualHostName}/{gameId}/{mp4Name}");
+                    if (node.Name == "source") node.SetAttributeValue("type", "video/mp4");
+                    changed++;
+                }
+
+                return changed > 0 ? doc.DocumentNode.OuterHtml : html;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, $"Failed to re-point converted media for game {gameId}");
+                changed = 0;
+                return html;
+            }
         }
 
         // Removes img/video tags whose playgif.local file no longer exists

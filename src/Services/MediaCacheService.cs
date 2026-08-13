@@ -170,10 +170,14 @@ namespace PlayGif.Services
         // Runs on every render, so affected descriptions heal without user action.
         private void RepairConvertedLocalRefs(HtmlDocument doc, Guid gameId, string gameDir)
         {
-            var repaired = 0;
+            var count = 0;
+            RepairConvertedLocalRefs(doc, gameId, gameDir, ref count);
+        }
 
-            foreach (var node in doc.DocumentNode.SelectNodes("//img[@src] | //source[@src] | //video[@src]")
-                ?? Enumerable.Empty<HtmlNode>())
+        private void RepairConvertedLocalRefs(HtmlDocument doc, Guid gameId, string gameDir, ref int repaired)
+        {
+            foreach (var node in (doc.DocumentNode.SelectNodes("//img[@src] | //source[@src] | //video[@src]")
+                ?? Enumerable.Empty<HtmlNode>()).ToList())
             {
                 var src = node.GetAttributeValue("src", "");
                 if (src.IndexOf(Constants.VirtualHostName, StringComparison.OrdinalIgnoreCase) < 0)
@@ -183,13 +187,20 @@ namespace PlayGif.Services
                 if (string.IsNullOrEmpty(fileName)) continue;
 
                 var ext = Path.GetExtension(fileName).ToLowerInvariant();
-                if (ext != ".gif" && ext != ".webm" && ext != ".apng" && ext != ".webp") continue;
-
-                // Only repair when the original is actually gone and an MP4 replaced it
-                if (File.Exists(Path.Combine(gameDir, fileName))) continue;
-
                 var mp4Name = Path.ChangeExtension(fileName, ".mp4");
-                if (!File.Exists(Path.Combine(gameDir, mp4Name))) continue;
+                var mp4OnDisk = File.Exists(Path.Combine(gameDir, mp4Name));
+
+                // An <img> naming an .mp4 is already broken and must become a
+                // <video>; earlier repairs swapped only the filename.
+                var imgNeedsElementSwap = node.Name == "img" && ext == ".mp4" && mp4OnDisk;
+
+                if (!imgNeedsElementSwap)
+                {
+                    if (ext != ".gif" && ext != ".webm" && ext != ".apng" && ext != ".webp") continue;
+                    // Only repair when the original is actually gone and an MP4 replaced it
+                    if (File.Exists(Path.Combine(gameDir, fileName))) continue;
+                    if (!mp4OnDisk) continue;
+                }
 
                 var mp4Url = VirtualUrl(gameId, mp4Name);
 
@@ -200,6 +211,8 @@ namespace PlayGif.Services
                     video.SetAttributeValue("muted", "");
                     video.SetAttributeValue("loop", "");
                     video.SetAttributeValue("playsinline", "");
+                    var style = node.GetAttributeValue("style", "");
+                    if (!string.IsNullOrEmpty(style)) video.SetAttributeValue("style", style);
                     var source = doc.CreateElement("source");
                     source.SetAttributeValue("src", mp4Url);
                     source.SetAttributeValue("type", "video/mp4");
@@ -435,25 +448,21 @@ namespace PlayGif.Services
                     try
                     {
                         var html = File.ReadAllText(descPath);
-                        var updated = html;
 
-                        foreach (var mp4 in Directory.GetFiles(gameDir, "*.mp4"))
-                        {
-                            var stem = Path.GetFileNameWithoutExtension(mp4);
-                            foreach (var ext in new[] { ".gif", ".webm", ".apng", ".webp" })
-                            {
-                                var original = stem + ext;
-                                // Only rewrite when the original is genuinely gone
-                                if (File.Exists(Path.Combine(gameDir, original))) continue;
-                                if (updated.IndexOf(original, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                        // Parsed rather than string-replaced: swapping .gif for .mp4
+                        // in the text leaves <img src="...mp4">, which never renders.
+                        // The element has to become a <video> too.
+                        var doc = new HtmlDocument();
+                        doc.LoadHtml(html);
 
-                                updated = updated.Replace(original, stem + ".mp4");
-                                total++;
-                            }
-                        }
+                        var gid = Guid.TryParse(Path.GetFileName(gameDir), out var parsed)
+                            ? parsed : Guid.Empty;
 
-                        if (!ReferenceEquals(updated, html) && updated != html)
-                            File.WriteAllText(descPath, updated);
+                        var before = total;
+                        RepairConvertedLocalRefs(doc, gid, gameDir, ref total);
+
+                        if (total != before)
+                            File.WriteAllText(descPath, doc.DocumentNode.OuterHtml);
                     }
                     catch (Exception ex)
                     {
