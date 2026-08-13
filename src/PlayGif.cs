@@ -105,6 +105,21 @@ namespace PlayGif
                         }));
                 };
 
+                // Playnite builds Grid view's details panel on demand, so at
+                // startup there is often nothing to inject into. Inject as soon
+                // as the element actually appears (issue #2).
+                _viewMonitor.DescriptionAppeared += () =>
+                {
+                    Application.Current.Dispatcher.BeginInvoke(
+                        DispatcherPriority.Loaded,
+                        new Action(() =>
+                        {
+                            if (_viewMonitor.IsInjected) return;
+                            if (_lastSelectedGame == null) return;
+                            TryInjectAndRender(_lastSelectedGame);
+                        }));
+                };
+
                 _viewMonitor.StartMonitoring();
 
                 // Subscribe to window events
@@ -209,11 +224,17 @@ namespace PlayGif
                     _injectionAttempts = 0;
                 }
 
-                // Step 1: Inject into visual tree if not already done
-                if (!_viewMonitor.IsInjected && _injectionAttempts < 5)
+                // Step 1: Inject into visual tree if not already done.
+                // No attempt cap: Playnite creates Grid view's details panel on
+                // demand, so at startup the element may not exist for a while.
+                // A capped retry burns its whole budget in milliseconds and then
+                // blocks injection for the rest of the session (issue #2).
+                // DescriptionAppeared re-drives this the moment the element shows up.
+                if (!_viewMonitor.IsInjected)
                 {
                     _injectionAttempts++;
-                    Logger.Info($"Attempting visual tree injection (attempt {_injectionAttempts})...");
+                    if (_injectionAttempts <= 3 || _injectionAttempts % 25 == 0)
+                        Logger.Info($"Attempting visual tree injection (attempt {_injectionAttempts})...");
                     _viewMonitor.TryInject(Application.Current.MainWindow, _renderer.WebViewControl);
 
                     if (_viewMonitor.IsInjected)
@@ -285,7 +306,11 @@ namespace PlayGif
                     }
                     else
                     {
-                        Logger.Info("Injection failed — PART_HtmlDescription not found yet.");
+                        // Expected while the description panel does not exist yet.
+                        // Throttled: this runs on every game selection until the
+                        // panel appears, and the log is shared with every extension.
+                        if (_injectionAttempts <= 3 || _injectionAttempts % 25 == 0)
+                            Logger.Info("Injection failed — description element not in the tree yet.");
                         return;
                     }
                 }
