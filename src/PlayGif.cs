@@ -73,7 +73,7 @@ namespace PlayGif
                 Logger.Info($"Plugin data path: {basePath}");
 
                 _cacheService = new MediaCacheService(Settings, basePath);
-                _steamService = new SteamDescriptionService(basePath);
+                _steamService = new SteamDescriptionService(basePath, () => _api.ApplicationSettings.Language);
                 _renderer = new DescriptionRendererService(Settings, () => basePath);
 
                 // Create the environment (doesn't need visual tree)
@@ -707,7 +707,7 @@ namespace PlayGif
             if (_steamService == null)
             {
                 var basePath = GetPluginUserDataPath();
-                _steamService = new SteamDescriptionService(basePath);
+                _steamService = new SteamDescriptionService(basePath, () => _api.ApplicationSettings.Language);
             }
 
             foreach (var game in games)
@@ -986,7 +986,7 @@ namespace PlayGif
                     foreach (var game in menuArgs.Games)
                     {
                         _cacheService.ClearGameCache(game.Id);
-                        _steamService?.ClearCachedDescription(game.Id);
+                        _steamService?.ClearAllCachedDescriptions(game.Id);
                     }
                     if (_renderer?.IsInitialized == true && _lastSelectedGame != null)
                         TryInjectAndRender(_lastSelectedGame);
@@ -1099,7 +1099,7 @@ namespace PlayGif
             {
                 // Service not initialized yet — create a temporary one for the fetch
                 var basePath = GetPluginUserDataPath();
-                _steamService = new SteamDescriptionService(basePath);
+                _steamService = new SteamDescriptionService(basePath, () => _api.ApplicationSettings.Language);
             }
 
             var allGames = _api.Database.Games.ToList();

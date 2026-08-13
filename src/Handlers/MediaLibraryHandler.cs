@@ -82,7 +82,17 @@ namespace PlayGif.Handlers
         // description doesn't fall back to streaming it from the original URL
         private bool StripFromCachedDescription(Guid gameId, string gameDir, string fileName)
         {
-            var descPath = Path.Combine(gameDir, "_description.html");
+            // Cached descriptions are language-specific (_description.html for
+            // English, _description.<lang>.html otherwise), so strip from every
+            // one present rather than assuming a single file.
+            var stripped = false;
+            foreach (var descPath in Directory.GetFiles(gameDir, "_description*.html"))
+                stripped |= StripFromDescriptionFile(descPath, fileName);
+            return stripped;
+        }
+
+        private bool StripFromDescriptionFile(string descPath, string fileName)
+        {
             if (!File.Exists(descPath)) return false;
 
             try
