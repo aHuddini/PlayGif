@@ -148,6 +148,8 @@ namespace PlayGif.Services
                     Map(source, "src", src);
             }
 
+            RepairConvertedLocalRefs(doc, gameId, gameDir);
+
             ReclaimStaleWebm(staleWebm, gameId);
 
             // Auto-download uncached files only if setting is enabled
@@ -157,6 +159,65 @@ namespace PlayGif.Services
             }
 
             return doc.DocumentNode.OuterHtml;
+        }
+
+        // Points already-local references at their converted MP4.
+        //
+        // Map() only runs for remote URLs, so it never sees media the user added
+        // themselves — those are written into the cached description as
+        // playgif.local URLs at insert time. After bulk conversion the original
+        // file is gone and the reference dangles, showing a broken image.
+        // Runs on every render, so affected descriptions heal without user action.
+        private void RepairConvertedLocalRefs(HtmlDocument doc, Guid gameId, string gameDir)
+        {
+            var repaired = 0;
+
+            foreach (var node in doc.DocumentNode.SelectNodes("//img[@src] | //source[@src] | //video[@src]")
+                ?? Enumerable.Empty<HtmlNode>())
+            {
+                var src = node.GetAttributeValue("src", "");
+                if (src.IndexOf(Constants.VirtualHostName, StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+
+                var fileName = src.Split('?')[0].Split('/').Last();
+                if (string.IsNullOrEmpty(fileName)) continue;
+
+                var ext = Path.GetExtension(fileName).ToLowerInvariant();
+                if (ext != ".gif" && ext != ".webm" && ext != ".apng" && ext != ".webp") continue;
+
+                // Only repair when the original is actually gone and an MP4 replaced it
+                if (File.Exists(Path.Combine(gameDir, fileName))) continue;
+
+                var mp4Name = Path.ChangeExtension(fileName, ".mp4");
+                if (!File.Exists(Path.Combine(gameDir, mp4Name))) continue;
+
+                var mp4Url = VirtualUrl(gameId, mp4Name);
+
+                if (node.Name == "img")
+                {
+                    var video = doc.CreateElement("video");
+                    video.SetAttributeValue("autoplay", "");
+                    video.SetAttributeValue("muted", "");
+                    video.SetAttributeValue("loop", "");
+                    video.SetAttributeValue("playsinline", "");
+                    var source = doc.CreateElement("source");
+                    source.SetAttributeValue("src", mp4Url);
+                    source.SetAttributeValue("type", "video/mp4");
+                    video.AppendChild(source);
+                    node.ParentNode.ReplaceChild(video, node);
+                }
+                else
+                {
+                    node.SetAttributeValue("src", mp4Url);
+                    if (node.Name == "source")
+                        node.SetAttributeValue("type", "video/mp4");
+                }
+
+                repaired++;
+            }
+
+            if (repaired > 0)
+                Logger.Info($"Repaired {repaired} converted media reference(s) for game {gameId}");
         }
 
         // Prefers MP4 over WebM — H.264 is hardware-decoded far more widely than VP9
@@ -356,6 +417,54 @@ namespace PlayGif.Services
         }
 
         public bool IsFfmpegAvailable() => FindFfmpeg() != null;
+
+        // Rewrites cached description files so references to converted media point
+        // at the MP4. RepairConvertedLocalRefs patches this at render time, but the
+        // file on disk should not stay stale — otherwise every render re-does the
+        // same work and anything else reading the cache still sees a dead link.
+        // Returns the number of references updated.
+        public int RepairDescriptionsOnDisk()
+        {
+            var total = 0;
+            if (!Directory.Exists(_cacheBasePath)) return 0;
+
+            foreach (var gameDir in Directory.GetDirectories(_cacheBasePath))
+            {
+                foreach (var descPath in Directory.GetFiles(gameDir, "_description*.html"))
+                {
+                    try
+                    {
+                        var html = File.ReadAllText(descPath);
+                        var updated = html;
+
+                        foreach (var mp4 in Directory.GetFiles(gameDir, "*.mp4"))
+                        {
+                            var stem = Path.GetFileNameWithoutExtension(mp4);
+                            foreach (var ext in new[] { ".gif", ".webm", ".apng", ".webp" })
+                            {
+                                var original = stem + ext;
+                                // Only rewrite when the original is genuinely gone
+                                if (File.Exists(Path.Combine(gameDir, original))) continue;
+                                if (updated.IndexOf(original, StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                                updated = updated.Replace(original, stem + ".mp4");
+                                total++;
+                            }
+                        }
+
+                        if (!ReferenceEquals(updated, html) && updated != html)
+                            File.WriteAllText(descPath, updated);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error(ex, $"Failed to repair description: {descPath}");
+                    }
+                }
+            }
+
+            if (total > 0) Logger.Info($"Repaired {total} media reference(s) in cached descriptions.");
+            return total;
+        }
 
         // Cached media that ffmpeg can re-encode to MP4. Excludes still images and
         // anything already MP4.

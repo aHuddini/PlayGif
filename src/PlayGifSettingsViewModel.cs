@@ -106,6 +106,11 @@ namespace PlayGif
             _plugin.RunBulkMp4Conversion();
         }
 
+        public void RepairDescriptionLinks()
+        {
+            _plugin.RunDescriptionRepair();
+        }
+
         public void OpenLogFolder()
         {
             _plugin.OpenLogFolderPublic();

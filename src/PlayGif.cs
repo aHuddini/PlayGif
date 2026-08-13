@@ -564,12 +564,95 @@ namespace PlayGif
                 IsIndeterminate = false
             });
 
+            // Descriptions still point at the originals we just replaced, so repair
+            // them rather than leaving broken references behind.
+            var repairedCache = _cacheService.RepairDescriptionsOnDisk();
+            var repairedDb = RepairStoredDescriptions();
+
             var savedMb = (before - after) / 1048576.0;
             _api.Dialogs.ShowMessage(
                 $"Converted: {converted}\n" +
                 (failed > 0 ? $"Failed: {failed}\n" : "") +
-                (converted > 0 ? $"\nDisk saved: {savedMb:F0} MB" : ""),
+                (converted > 0 ? $"\nDisk saved: {savedMb:F0} MB" : "") +
+                (repairedCache + repairedDb > 0
+                    ? $"\nDescription links updated: {repairedCache + repairedDb}" : ""),
                 Constants.PluginName);
+
+            if (_lastSelectedGame != null) TryInjectAndRender(_lastSelectedGame);
+        }
+
+        // Media the user added is written into the game's Playnite description as a
+        // playgif.local URL. After conversion that filename no longer exists, so the
+        // stored description needs the same repair as the cached one.
+        private int RepairStoredDescriptions()
+        {
+            var total = 0;
+            var basePath = System.IO.Path.Combine(
+                GetPluginUserDataPath(), Common.Constants.GamesCacheFolder);
+
+            foreach (var game in _api.Database.Games)
+            {
+                var desc = game.Description;
+                if (string.IsNullOrEmpty(desc)) continue;
+                if (desc.IndexOf(Constants.VirtualHostName, StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                var gameDir = System.IO.Path.Combine(basePath, game.Id.ToString());
+                if (!System.IO.Directory.Exists(gameDir)) continue;
+
+                var updated = desc;
+                foreach (var mp4 in System.IO.Directory.GetFiles(gameDir, "*.mp4"))
+                {
+                    var stem = System.IO.Path.GetFileNameWithoutExtension(mp4);
+                    foreach (var ext in new[] { ".gif", ".webm", ".apng", ".webp" })
+                    {
+                        var original = stem + ext;
+                        if (System.IO.File.Exists(System.IO.Path.Combine(gameDir, original))) continue;
+                        if (updated.IndexOf(original, StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                        updated = updated.Replace(original, stem + ".mp4");
+                        total++;
+                    }
+                }
+
+                if (updated != desc)
+                {
+                    game.Description = updated;
+                    _api.Database.Games.Update(game);
+                }
+            }
+
+            if (total > 0) Logger.Info($"Repaired {total} media reference(s) in stored descriptions.");
+            return total;
+        }
+
+        // Standalone repair for users who converted before this existed, or whose
+        // descriptions reference media that is no longer on disk.
+        public void RunDescriptionRepair()
+        {
+            if (_cacheService == null)
+            {
+                _api.Dialogs.ShowMessage(
+                    "PlayGif is still starting up. Try again in a moment.",
+                    Constants.PluginName);
+                return;
+            }
+
+            var repairedCache = _cacheService.RepairDescriptionsOnDisk();
+            var repairedDb = RepairStoredDescriptions();
+            var total = repairedCache + repairedDb;
+
+            if (total == 0)
+            {
+                _api.Dialogs.ShowMessage(
+                    "No broken media links found — descriptions already point at the right files.",
+                    Constants.PluginName);
+            }
+            else
+            {
+                _api.Dialogs.ShowMessage(
+                    $"Updated {total} media link(s) to point at converted MP4 files.",
+                    Constants.PluginName);
+            }
 
             if (_lastSelectedGame != null) TryInjectAndRender(_lastSelectedGame);
         }
