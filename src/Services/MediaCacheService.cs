@@ -46,13 +46,34 @@ namespace PlayGif.Services
                 var filename = GetCacheFilename(url);
                 var localPath = Path.Combine(gameDir, filename);
 
-                // An ffmpeg-converted orphan keeps the same hash, only the extension changes
-                var mp4Path = filename.EndsWith(".webm", StringComparison.OrdinalIgnoreCase)
-                    ? Path.ChangeExtension(localPath, ".mp4") : null;
+                // A converted file keeps the same hash, only the extension changes.
+                // Applies to anything ffmpeg re-encoded, not just WebM.
+                var ext = Path.GetExtension(filename).ToLowerInvariant();
+                var convertible = ext == ".webm" || ext == ".gif" || ext == ".apng" || ext == ".webp";
+                var mp4Path = convertible ? Path.ChangeExtension(localPath, ".mp4") : null;
 
                 if (mp4Path != null && File.Exists(mp4Path))
                 {
-                    node.SetAttributeValue(attrName, VirtualUrl(gameId, Path.GetFileName(mp4Path)));
+                    var mp4Url = VirtualUrl(gameId, Path.GetFileName(mp4Path));
+
+                    // An <img> cannot play an MP4, so it has to become a <video>.
+                    // Muted, looping and autoplaying keeps GIF-like behaviour.
+                    if (node.Name == "img")
+                    {
+                        var video = node.OwnerDocument.CreateElement("video");
+                        video.SetAttributeValue("autoplay", "");
+                        video.SetAttributeValue("muted", "");
+                        video.SetAttributeValue("loop", "");
+                        video.SetAttributeValue("playsinline", "");
+                        var src = node.OwnerDocument.CreateElement("source");
+                        src.SetAttributeValue("src", mp4Url);
+                        src.SetAttributeValue("type", "video/mp4");
+                        video.AppendChild(src);
+                        node.ParentNode.ReplaceChild(video, node);
+                        return;
+                    }
+
+                    node.SetAttributeValue(attrName, mp4Url);
                     if (node.Name == "source")
                         node.SetAttributeValue("type", "video/mp4");
                 }
@@ -247,56 +268,152 @@ namespace PlayGif.Services
 
         private void ConvertWebmToMp4(string webmPath)
         {
+            ConvertToMp4(webmPath);
+        }
+
+        // Converts any ffmpeg-readable animation (WebM, GIF, APNG, animated WebP)
+        // to H.264 MP4. Returns true when an MP4 exists afterwards.
+        //
+        // Two arguments are load-bearing and must stay together:
+        //  - yuv420p, because libx264 otherwise picks yuv444p for GIF input and
+        //    most browsers and hardware decoders will not play that.
+        //  - the scale filter, because yuv420p requires even dimensions and GIFs
+        //    are often odd-sized; without it ffmpeg fails outright.
+        // Supplying only one of the two produces a file that looks converted but
+        // does not render, which is worse than not converting at all.
+        public bool ConvertToMp4(string sourcePath)
+        {
             try
             {
-                var mp4Path = Path.ChangeExtension(webmPath, ".mp4");
-                if (File.Exists(mp4Path)) return;
+                if (!File.Exists(sourcePath)) return false;
+
+                var mp4Path = Path.ChangeExtension(sourcePath, ".mp4");
+                if (string.Equals(sourcePath, mp4Path, StringComparison.OrdinalIgnoreCase))
+                    return true;
+                if (File.Exists(mp4Path)) return true;
 
                 var ffmpeg = FindFfmpeg();
                 if (ffmpeg == null)
                 {
-                    Logger.Info("FFmpeg not found, skipping WebM to MP4 conversion.");
-                    return;
+                    Logger.Info("FFmpeg not found, skipping conversion to MP4.");
+                    return false;
                 }
 
-                Logger.Info($"Converting {Path.GetFileName(webmPath)} to MP4...");
+                var args =
+                    $"-i \"{sourcePath}\" -c:v libx264 -pix_fmt yuv420p " +
+                    "-vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" " +
+                    $"-preset veryfast -crf 23 -an -movflags +faststart -y \"{mp4Path}\"";
 
-                var process = new Process
+                var stderr = new System.Text.StringBuilder();
+
+                using (var process = new Process
                 {
                     StartInfo = new ProcessStartInfo
                     {
                         FileName = ffmpeg,
-                        Arguments = $"-i \"{webmPath}\" -c:v libx264 -preset veryfast -crf 23 -an -y \"{mp4Path}\"",
+                        Arguments = args,
                         UseShellExecute = false,
                         CreateNoWindow = true,
                         RedirectStandardError = true
                     }
-                };
+                })
+                {
+                    // Must drain stderr asynchronously. ffmpeg emits enough output on
+                    // a large file to fill the pipe buffer; with no reader it blocks
+                    // on write and never exits, so WaitForExit reports a timeout for
+                    // a conversion that actually succeeded.
+                    process.ErrorDataReceived += (s, e) =>
+                    {
+                        if (e.Data != null) stderr.AppendLine(e.Data);
+                    };
 
-                process.Start();
-                var exited = process.WaitForExit(60000); // 60 second timeout
+                    process.Start();
+                    process.BeginErrorReadLine();
 
-                if (!exited)
-                {
-                    Logger.Error($"FFmpeg timed out for: {Path.GetFileName(webmPath)}");
-                    try { process.Kill(); } catch { }
-                    if (File.Exists(mp4Path)) File.Delete(mp4Path);
+                    if (!process.WaitForExit(120000))
+                    {
+                        Logger.Error($"FFmpeg timed out for: {Path.GetFileName(sourcePath)}");
+                        try { process.Kill(); } catch { }
+                        if (File.Exists(mp4Path)) File.Delete(mp4Path);
+                        return false;
+                    }
+
+                    if (process.ExitCode == 0 && File.Exists(mp4Path) && new FileInfo(mp4Path).Length > 0)
+                        return true;
+
+                    Logger.Error($"FFmpeg failed on {Path.GetFileName(sourcePath)} " +
+                                 $"(exit {process.ExitCode}): {stderr}");
                 }
-                else if (process.ExitCode == 0 && File.Exists(mp4Path))
-                {
-                    Logger.Info($"Converted: {Path.GetFileName(mp4Path)} ({new FileInfo(mp4Path).Length / 1024} KB)");
-                }
-                else
-                {
-                    var error = process.StandardError.ReadToEnd();
-                    Logger.Error($"FFmpeg failed (exit {process.ExitCode}): {error}");
-                    if (File.Exists(mp4Path)) File.Delete(mp4Path);
-                }
+
+                if (File.Exists(mp4Path)) File.Delete(mp4Path);
+                return false;
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "WebM to MP4 conversion failed");
+                Logger.Error(ex, $"Conversion to MP4 failed for {sourcePath}");
+                return false;
             }
+        }
+
+        public bool IsFfmpegAvailable() => FindFfmpeg() != null;
+
+        // Cached media that ffmpeg can re-encode to MP4. Excludes still images and
+        // anything already MP4.
+        public List<string> FindConvertibleMedia()
+        {
+            var results = new List<string>();
+            if (!Directory.Exists(_cacheBasePath)) return results;
+
+            var convertible = new[] { ".gif", ".webm", ".apng", ".webp" };
+
+            foreach (var gameDir in Directory.GetDirectories(_cacheBasePath))
+            {
+                foreach (var file in Directory.GetFiles(gameDir))
+                {
+                    var ext = Path.GetExtension(file).ToLowerInvariant();
+                    if (Array.IndexOf(convertible, ext) < 0) continue;
+
+                    // Already converted
+                    if (File.Exists(Path.ChangeExtension(file, ".mp4"))) continue;
+
+                    // A still WebP or APNG has nothing to gain from H.264
+                    if ((ext == ".webp" || ext == ".apng") && !IsAnimated(file)) continue;
+
+                    results.Add(file);
+                }
+            }
+
+            return results;
+        }
+
+        // ffprobe reports more than one frame for animated content
+        private bool IsAnimated(string path)
+        {
+            try
+            {
+                var ffmpeg = FindFfmpeg();
+                if (ffmpeg == null) return false;
+                var ffprobe = Path.Combine(Path.GetDirectoryName(ffmpeg), "ffprobe.exe");
+                if (!File.Exists(ffprobe)) return true; // can't tell — let ffmpeg decide
+
+                var p = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = ffprobe,
+                        Arguments = $"-v error -select_streams v:0 -count_frames " +
+                                    $"-show_entries stream=nb_read_frames -of csv=p=0 \"{path}\"",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true
+                    }
+                };
+                p.Start();
+                var output = p.StandardOutput.ReadToEnd().Trim();
+                p.WaitForExit(15000);
+                return int.TryParse(output, out var frames) && frames > 1;
+            }
+            catch { return true; }
         }
 
         private string FindFfmpeg()

@@ -481,6 +481,99 @@ namespace PlayGif
             }
         }
 
+        // Called from the Performance settings tab. Re-encodes cached GIF/WebM/
+        // animated WebP to H.264 MP4, which decodes far more cheaply and is
+        // dramatically smaller — a GIF carries every frame as a full image.
+        public void RunBulkMp4Conversion()
+        {
+            if (_cacheService == null)
+            {
+                _api.Dialogs.ShowMessage(
+                    "PlayGif is still starting up. Try again in a moment.",
+                    Constants.PluginName);
+                return;
+            }
+
+            if (!_cacheService.IsFfmpegAvailable())
+            {
+                _api.Dialogs.ShowMessage(
+                    "FFmpeg was not found.\n\n" +
+                    "Install FFmpeg and make sure it is on your PATH, or set its location " +
+                    "in Settings -> Advanced -> FFmpeg path.",
+                    Constants.PluginName);
+                return;
+            }
+
+            var files = _cacheService.FindConvertibleMedia();
+            if (files.Count == 0)
+            {
+                _api.Dialogs.ShowMessage(
+                    "Nothing to convert — all cached media is already MP4.",
+                    Constants.PluginName);
+                return;
+            }
+
+            var totalMb = files.Sum(f => new System.IO.FileInfo(f).Length) / 1048576.0;
+            var confirm = _api.Dialogs.ShowMessage(
+                $"Convert {files.Count} cached file(s) to MP4?\n\n" +
+                $"Current size: {totalMb:F0} MB\n\n" +
+                "Originals are deleted once each conversion succeeds. Descriptions " +
+                "keep working — they switch to the MP4 automatically.\n\n" +
+                "This can take a while for large libraries.",
+                Constants.PluginName,
+                MessageBoxButton.YesNo);
+
+            if (confirm != MessageBoxResult.Yes) return;
+
+            var converted = 0;
+            var failed = 0;
+            long before = 0, after = 0;
+
+            _api.Dialogs.ActivateGlobalProgress((progressArgs) =>
+            {
+                progressArgs.ProgressMaxValue = files.Count;
+
+                for (int i = 0; i < files.Count; i++)
+                {
+                    if (progressArgs.CancelToken.IsCancellationRequested) break;
+
+                    var file = files[i];
+                    progressArgs.Text =
+                        $"Converting {System.IO.Path.GetFileName(file)} ({i + 1}/{files.Count})";
+
+                    var size = new System.IO.FileInfo(file).Length;
+
+                    if (_cacheService.ConvertToMp4(file))
+                    {
+                        var mp4 = System.IO.Path.ChangeExtension(file, ".mp4");
+                        before += size;
+                        after += new System.IO.FileInfo(mp4).Length;
+                        // Only remove the original once the MP4 is confirmed on disk
+                        try { System.IO.File.Delete(file); } catch { }
+                        converted++;
+                    }
+                    else
+                    {
+                        failed++;
+                    }
+
+                    progressArgs.CurrentProgressValue = i + 1;
+                }
+            }, new GlobalProgressOptions($"Converting media to MP4 (0/{files.Count})...", true)
+            {
+                IsIndeterminate = false
+            });
+
+            var savedMb = (before - after) / 1048576.0;
+            _api.Dialogs.ShowMessage(
+                $"Converted: {converted}\n" +
+                (failed > 0 ? $"Failed: {failed}\n" : "") +
+                (converted > 0 ? $"\nDisk saved: {savedMb:F0} MB" : ""),
+                Constants.PluginName);
+
+            if (_lastSelectedGame != null) TryInjectAndRender(_lastSelectedGame);
+        }
+
         // Called from the Theme Support settings tab
         public void RunLayoutReport()
         {

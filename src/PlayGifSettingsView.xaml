@@ -62,6 +62,15 @@
                                  IsEnabled="{Binding Settings.AutoCacheMedia}"/>
                     </StackPanel>
 
+                    <TextBlock TextWrapping="Wrap" Opacity="0.75" Margin="0,10,0,6"
+                               Text="Convert cached GIFs and other animations to MP4. A GIF stores every frame as a full image, so an MP4 is typically a fraction of the size and is hardware-decoded, which cuts both disk use and playback cost. Descriptions switch to the MP4 automatically."/>
+                    <TextBlock TextWrapping="Wrap" Opacity="0.5" Margin="0,0,0,8"
+                               Text="Requires FFmpeg. Originals are removed only after a conversion succeeds."/>
+                    <Button Content="Convert cached media to MP4"
+                            Click="ConvertToMp4Button_Click"
+                            HorizontalAlignment="Left"
+                            Padding="12,6" Margin="0,0,0,5"/>
+
                     <Separator Margin="0,15,0,15"/>
 
                     <TextBlock Text="Descriptions" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
