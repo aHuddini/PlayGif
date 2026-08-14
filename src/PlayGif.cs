@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -753,6 +754,35 @@ namespace PlayGif
             }
         }
 
+        // Backs the editor's Insert menu. Reuses the same paths as the right-click
+        // menu, so format detection, caching and virtual-host URLs all behave
+        // identically — only the insertion point differs.
+        private async Task<string> ProvideMediaTagAsync(Game game, string source)
+        {
+            switch (source)
+            {
+                case "search":
+                    var picked = PickWebImageUrl(game);
+                    return string.IsNullOrEmpty(picked)
+                        ? null : await DownloadMediaTagAsync(game, picked);
+
+                case "url":
+                    var input = _api.Dialogs.SelectString(
+                        "Enter media URL (GIF, MP4, image):", Constants.PluginName, "");
+                    if (input == null || !input.Result ||
+                        string.IsNullOrWhiteSpace(input.SelectedString)) return null;
+                    return await DownloadMediaTagAsync(game, input.SelectedString.Trim());
+
+                case "file":
+                    var path = _api.Dialogs.SelectFile(
+                        "Media files|*.gif;*.mp4;*.webp;*.apng;*.avif;*.png;*.jpg|All files|*.*");
+                    return string.IsNullOrEmpty(path) ? null : CopyAndBuildMediaTag(game, path);
+
+                default:
+                    return null;
+            }
+        }
+
         // Opens the description in a WYSIWYG editor. Edits are written to PlayGif's
         // cached description, which is what the renderer displays.
         private async void EditDescription(Game game)
@@ -775,7 +805,8 @@ namespace PlayGif
                     html = game.Description ?? "";
 
                 var window = new Views.DescriptionEditorWindow(
-                    html, game.Id, GetPluginUserDataPath(), game.Name)
+                    html, game.Id, GetPluginUserDataPath(), game.Name,
+                    (source) => ProvideMediaTagAsync(game, source))
                 {
                     Owner = Application.Current.MainWindow
                 };
@@ -913,6 +944,18 @@ namespace PlayGif
 
         private async void DownloadAndInsertMedia(Game game, string url, string position)
         {
+            var tag = await DownloadMediaTagAsync(game, url);
+            if (tag == null) return;
+
+            Application.Current.Dispatcher.Invoke(() => InsertMediaTag(game, tag, position));
+        }
+
+        // Downloads into the game's cache and returns the tag, without inserting.
+        // The editor needs the tag to place at the cursor rather than at the top
+        // or bottom, so both callers share this. Returns null on failure, having
+        // already reported it.
+        private async Task<string> DownloadMediaTagAsync(Game game, string url)
+        {
             try
             {
                 var uri = new Uri(url);
@@ -931,26 +974,32 @@ namespace PlayGif
 
                 var localUrl = $"https://{Common.Constants.VirtualHostName}/{game.Id}/{fileName}";
                 var ext = System.IO.Path.GetExtension(fileName).ToLowerInvariant();
-                var tag = BuildMediaTag(localUrl, ext);
-
-                Application.Current.Dispatcher.Invoke(() =>
-                    InsertMediaTag(game, tag, position));
+                return BuildMediaTag(localUrl, ext);
             }
             catch (Exception ex)
             {
                 Logger.Error(ex, $"Failed to download media from: {url}");
                 Application.Current.Dispatcher.Invoke(() =>
                     _api.Dialogs.ShowMessage($"Failed to download: {ex.Message}", Constants.PluginName));
+                return null;
             }
         }
 
 
         private void SearchWebImages(Game game, string position)
         {
+            var url = PickWebImageUrl(game);
+            if (!string.IsNullOrEmpty(url)) DownloadAndInsertMedia(game, url, position);
+        }
+
+        // Runs the search and picker, returning the chosen URL without downloading.
+        // Shared with the editor, which needs to insert at the cursor instead.
+        private string PickWebImageUrl(Game game)
+        {
             var input = _api.Dialogs.SelectString(
                 "Search for images/GIFs:", Constants.PluginName, $"{game.Name} gif");
             if (input == null || !input.Result || string.IsNullOrWhiteSpace(input.SelectedString))
-                return;
+                return null;
 
             var searchTerm = input.SelectedString.Trim();
             var imageOptions = new System.Collections.Generic.List<ImageFileOption>();
@@ -1014,13 +1063,13 @@ namespace PlayGif
             {
                 Logger.Error(ex, "Web image search failed");
                 _api.Dialogs.ShowMessage($"Search failed: {ex.Message}", Constants.PluginName);
-                return;
+                return null;
             }
 
             if (imageOptions.Count == 0)
             {
                 _api.Dialogs.ShowMessage("No images found.", Constants.PluginName);
-                return;
+                return null;
             }
 
             var mediaItems = imageOptions.Select(o => new Views.MediaItem
@@ -1034,7 +1083,9 @@ namespace PlayGif
             picker.Title = $"Pick media for {game.Name} ({mediaItems.Count} results)";
 
             if (picker.ShowDialog() == true && !string.IsNullOrEmpty(picker.SelectedUrl))
-                DownloadAndInsertMedia(game, picker.SelectedUrl, position);
+                return picker.SelectedUrl;
+
+            return null;
         }
 
         private static string SanitizeFileName(string name)

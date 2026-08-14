@@ -18,32 +18,52 @@
         overflow: hidden;
     }
     #toolbar {
-        display: flex; align-items: center; gap: 4px;
-        padding: 8px; background: var(--panel);
+        display: flex; align-items: center; gap: 3px;
+        padding: 7px 8px; background: var(--panel);
         border-bottom: 1px solid var(--border);
         flex-wrap: wrap;
     }
-    #toolbar button {
+    #toolbar button, #toolbar select {
         background: transparent; color: var(--text);
         border: 1px solid transparent; border-radius: 4px;
-        padding: 5px 9px; cursor: pointer; font-size: 13px;
-        min-width: 30px;
+        padding: 5px 8px; cursor: pointer; font-size: 13px;
+        min-width: 28px;
     }
-    #toolbar button:hover { background: #2a2a3a; border-color: var(--border); }
+    #toolbar select { background: #24243050; border-color: var(--border); }
+    #toolbar button:hover, #toolbar select:hover { background: #2a2a3a; border-color: var(--border); }
     #toolbar button.active { background: var(--accent); border-color: var(--accent); }
     .sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
     .spacer { flex: 1; }
 
+    /* Dropdown menus (insert, colour) */
+    .menu-wrap { position: relative; display: inline-block; }
+    .menu {
+        display: none; position: absolute; top: 100%; left: 0; z-index: 50;
+        background: var(--panel); border: 1px solid var(--border);
+        border-radius: 4px; padding: 4px; min-width: 170px;
+        box-shadow: 0 6px 18px rgba(0,0,0,.5);
+    }
+    .menu.open { display: block; }
+    .menu button { display: block; width: 100%; text-align: left; padding: 7px 10px; }
+
+    .swatches { display: grid; grid-template-columns: repeat(6, 22px); gap: 4px; padding: 6px; }
+    .swatch { width: 22px; height: 22px; border-radius: 3px; border: 1px solid #0006; cursor: pointer; }
+
     #editor, #source {
-        position: absolute; top: 45px; bottom: 0; left: 0; right: 0;
+        position: absolute; top: 46px; bottom: 0; left: 0; right: 0;
         padding: 16px; overflow-y: auto; box-sizing: border-box;
     }
     #editor:focus { outline: none; }
     #editor img, #editor video { max-width: 100%; height: auto; display: block; margin: 6px 0; }
     #editor a { color: #60A5FA; }
-
-    /* Media is easy to select and delete when its bounds are visible */
+    #editor blockquote {
+        border-left: 3px solid var(--accent); margin: 8px 0;
+        padding: 4px 12px; color: #c9c9da;
+    }
+    #editor hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
     #editor img:hover, #editor video:hover { outline: 2px solid var(--accent); }
+    /* The element the media toolbar is acting on */
+    #editor .pg-selected { outline: 2px solid var(--accent) !important; }
 
     #source {
         display: none; background: #101018; color: #c8c8d8;
@@ -52,61 +72,243 @@
     }
     #source:focus { outline: none; }
     .hint { color: var(--muted); font-size: 12px; margin-left: 6px; }
+
+    /* Floating controls shown when media is clicked */
+    #mediabar {
+        display: none; position: absolute; z-index: 60;
+        background: var(--panel); border: 1px solid var(--border);
+        border-radius: 4px; padding: 4px; gap: 3px;
+        box-shadow: 0 6px 18px rgba(0,0,0,.5);
+    }
+    #mediabar.show { display: flex; }
+    #mediabar button {
+        background: transparent; color: var(--text); border: 1px solid transparent;
+        border-radius: 3px; padding: 4px 8px; cursor: pointer; font-size: 12px;
+    }
+    #mediabar button:hover { background: #2a2a3a; border-color: var(--border); }
+    #mediabar button.danger:hover { background: #b91c1c; border-color: #b91c1c; }
 </style>
 </head>
 <body>
 <div id="toolbar">
+    <select id="blockstyle" onchange="setBlock(this.value)" title="Paragraph style">
+        <option value="p">Normal</option>
+        <option value="h2">Heading</option>
+        <option value="h3">Subheading</option>
+        <option value="blockquote">Quote</option>
+    </select>
+    <div class="sep"></div>
+
     <button onclick="cmd('bold')" id="b-bold" title="Bold"><b>B</b></button>
     <button onclick="cmd('italic')" id="b-italic" title="Italic"><i>I</i></button>
     <button onclick="cmd('underline')" id="b-underline" title="Underline"><u>U</u></button>
+
+    <div class="menu-wrap">
+        <button onclick="toggleMenu('colormenu')" title="Text colour">A&#9662;</button>
+        <div class="menu" id="colormenu">
+            <div class="swatches" id="swatches"></div>
+            <button onclick="cmd('removeFormat'); closeMenus()">Clear formatting</button>
+        </div>
+    </div>
     <div class="sep"></div>
-    <button onclick="cmd('insertUnorderedList')" title="Bulleted list">&#8226; List</button>
-    <button onclick="cmd('formatBlock','<h3>')" title="Heading">H</button>
+
+    <button onclick="cmd('insertUnorderedList')" title="Bulleted list">&#8226;</button>
+    <button onclick="cmd('insertOrderedList')" title="Numbered list">1.</button>
+    <button onclick="cmd('justifyLeft')" title="Align left">&#8676;</button>
+    <button onclick="cmd('justifyCenter')" title="Centre">&#8596;</button>
+    <button onclick="cmd('justifyRight')" title="Align right">&#8677;</button>
+    <div class="sep"></div>
+
     <button onclick="makeLink()" title="Insert link">Link</button>
+    <button onclick="cmd('insertHorizontalRule')" title="Divider">&#8213;</button>
+
+    <div class="menu-wrap">
+        <button onclick="toggleMenu('insertmenu')" title="Insert media">+ Insert&#9662;</button>
+        <div class="menu" id="insertmenu">
+            <button onclick="insertMedia('search')">Search web images...</button>
+            <button onclick="insertMedia('url')">From URL...</button>
+            <button onclick="insertMedia('file')">Local file...</button>
+        </div>
+    </div>
     <div class="sep"></div>
+
     <button onclick="cmd('undo')" title="Undo">&#8630;</button>
     <button onclick="cmd('redo')" title="Redo">&#8631;</button>
+
     <div class="spacer"></div>
-    <span class="hint" id="hint">Media plays while you edit. Click it to select, Delete to remove.</span>
+    <span class="hint" id="hint">Click media to resize or remove it.</span>
     <button onclick="toggleSource()" id="b-source" title="Edit raw HTML">&lt;/&gt; HTML</button>
 </div>
 
 <div id="editor" contenteditable="true"></div>
 <textarea id="source" spellcheck="false"></textarea>
 
+<div id="mediabar">
+    <button onclick="scaleMedia(25)">25%</button>
+    <button onclick="scaleMedia(50)">50%</button>
+    <button onclick="scaleMedia(75)">75%</button>
+    <button onclick="scaleMedia(100)">100%</button>
+    <button class="danger" onclick="deleteMedia()">Delete</button>
+</div>
+
 <script>
     var showingSource = false;
+    var savedRange = null;
+    var selectedMedia = null;
+
+    var COLORS = ['#e6e6ef','#9ca3af','#ef4444','#f59e0b','#22c55e','#3B82F6',
+                  '#a855f7','#ec4899','#14b8a6','#eab308','#64748b','#ffffff'];
+
+    (function buildSwatches() {
+        var box = document.getElementById('swatches');
+        COLORS.forEach(function (c) {
+            var d = document.createElement('div');
+            d.className = 'swatch';
+            d.style.background = c;
+            d.onclick = function () { cmd('foreColor', c); closeMenus(); };
+            box.appendChild(d);
+        });
+    })();
+
+    function ed() { return document.getElementById('editor'); }
+
+    // A dialog steals focus and destroys the selection, so the caret position is
+    // captured before opening one and restored before inserting.
+    function saveRange() {
+        var sel = window.getSelection();
+        if (sel && sel.rangeCount > 0 && ed().contains(sel.anchorNode))
+            savedRange = sel.getRangeAt(0).cloneRange();
+    }
+
+    function restoreRange() {
+        ed().focus();
+        if (!savedRange) return;
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(savedRange);
+    }
+
+    document.addEventListener('selectionchange', function () {
+        if (!showingSource) { saveRange(); updateState(); }
+    });
 
     function cmd(name, arg) {
         if (showingSource) return;
-        document.getElementById('editor').focus();
+        ed().focus();
         document.execCommand(name, false, arg || null);
+        saveRange();
         updateState();
+    }
+
+    function setBlock(tag) {
+        if (showingSource) return;
+        cmd('formatBlock', '<' + tag + '>');
     }
 
     function makeLink() {
         if (showingSource) return;
+        saveRange();
         var url = prompt('Link URL:', 'https://');
-        if (url) cmd('createLink', url);
+        if (!url) return;
+        restoreRange();
+        document.execCommand('createLink', false, url);
     }
 
-    // The editable surface and the raw HTML are two views of the same content;
-    // switching syncs whichever one was being edited into the other.
+    function toggleMenu(id) {
+        var m = document.getElementById(id);
+        var wasOpen = m.classList.contains('open');
+        closeMenus();
+        if (!wasOpen) { saveRange(); m.classList.add('open'); }
+    }
+
+    function closeMenus() {
+        ['insertmenu', 'colormenu'].forEach(function (id) {
+            document.getElementById(id).classList.remove('open');
+        });
+    }
+
+    document.addEventListener('click', function (e) {
+        if (!e.target.closest('.menu-wrap')) closeMenus();
+    });
+
+    // Asks C# to fetch media; it calls insertHtml() back with the finished tag
+    function insertMedia(source) {
+        closeMenus();
+        if (showingSource) {
+            alert('Switch out of HTML view to insert media.');
+            return;
+        }
+        saveRange();
+        window.chrome.webview.postMessage(JSON.stringify({ type: 'insert', source: source }));
+    }
+
+    // Called from C#
+    function insertHtml(html) {
+        restoreRange();
+        document.execCommand('insertHTML', false, html);
+        saveRange();
+    }
+
+    // --- media selection -------------------------------------------------
+    ed().addEventListener('click', function (e) {
+        var t = e.target;
+        if (t.tagName === 'IMG' || t.tagName === 'VIDEO') selectMedia(t);
+        else clearMediaSelection();
+    });
+
+    function selectMedia(el) {
+        clearMediaSelection();
+        selectedMedia = el;
+        el.classList.add('pg-selected');
+
+        var bar = document.getElementById('mediabar');
+        var r = el.getBoundingClientRect();
+        bar.classList.add('show');
+        // Above the element, or below it when there is no room
+        var top = r.top - bar.offsetHeight - 6;
+        if (top < 50) top = r.bottom + 6;
+        bar.style.top = top + 'px';
+        bar.style.left = Math.max(8, r.left) + 'px';
+    }
+
+    function clearMediaSelection() {
+        if (selectedMedia) selectedMedia.classList.remove('pg-selected');
+        selectedMedia = null;
+        document.getElementById('mediabar').classList.remove('show');
+    }
+
+    function scaleMedia(pct) {
+        if (!selectedMedia) return;
+        selectedMedia.style.maxWidth = pct + '%';
+        selectedMedia.style.height = 'auto';
+        selectMedia(selectedMedia);   // reposition the bar
+    }
+
+    function deleteMedia() {
+        if (!selectedMedia) return;
+        var el = selectedMedia;
+        clearMediaSelection();
+        el.parentNode.removeChild(el);
+    }
+
+    ed().addEventListener('scroll', clearMediaSelection);
+
+    // --- source view -----------------------------------------------------
     function toggleSource() {
-        var ed = document.getElementById('editor');
+        var e = ed();
         var src = document.getElementById('source');
         var btn = document.getElementById('b-source');
+        clearMediaSelection();
 
         if (showingSource) {
-            ed.innerHTML = src.value;
+            e.innerHTML = src.value;
             src.style.display = 'none';
-            ed.style.display = 'block';
+            e.style.display = 'block';
             btn.classList.remove('active');
-            document.getElementById('hint').textContent =
-                'Media plays while you edit. Click it to select, Delete to remove.';
+            document.getElementById('hint').textContent = 'Click media to resize or remove it.';
         } else {
-            src.value = ed.innerHTML;
-            ed.style.display = 'none';
+            src.value = e.innerHTML;
+            e.style.display = 'none';
             src.style.display = 'block';
             btn.classList.add('active');
             document.getElementById('hint').textContent = 'Editing raw HTML.';
@@ -115,21 +317,19 @@
     }
 
     function updateState() {
-        ['bold','italic','underline'].forEach(function (c) {
+        ['bold', 'italic', 'underline'].forEach(function (c) {
             var b = document.getElementById('b-' + c);
             if (!b) return;
             try {
                 if (document.queryCommandState(c)) b.classList.add('active');
                 else b.classList.remove('active');
-            } catch (e) {}
+            } catch (err) {}
         });
     }
 
-    document.addEventListener('selectionchange', updateState);
-
     // Paste as plain text, so copying from a browser does not drag in
     // stylesheets and layout that break the description
-    document.getElementById('editor').addEventListener('paste', function (e) {
+    ed().addEventListener('paste', function (e) {
         e.preventDefault();
         var text = (e.clipboardData || window.clipboardData).getData('text/plain');
         document.execCommand('insertText', false, text);
@@ -137,14 +337,15 @@
 
     // Called from C#
     function setContent(html) {
-        document.getElementById('editor').innerHTML = html;
+        ed().innerHTML = html;
         document.getElementById('source').value = html;
     }
 
     function getContent() {
+        clearMediaSelection();
         return showingSource
             ? document.getElementById('source').value
-            : document.getElementById('editor').innerHTML;
+            : ed().innerHTML;
     }
 </script>
 </body>

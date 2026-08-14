@@ -17,17 +17,23 @@ namespace PlayGif.Views
         private readonly string _initialHtml;
         private readonly Guid _gameId;
         private readonly string _cacheBasePath;
+        private readonly Func<string, Task<string>> _mediaProvider;
         private bool _ready;
 
         public string ResultHtml { get; private set; }
 
-        public DescriptionEditorWindow(string html, Guid gameId, string cacheBasePath, string gameName)
+        // mediaProvider takes "search" | "url" | "file" and returns the HTML tag to
+        // insert, or null if cancelled. Supplied by the plugin so the editor reuses
+        // the same download, format-detection and caching paths as the menu.
+        public DescriptionEditorWindow(string html, Guid gameId, string cacheBasePath, string gameName,
+                                       Func<string, Task<string>> mediaProvider = null)
         {
             InitializeComponent();
 
             _initialHtml = html ?? "";
             _gameId = gameId;
             _cacheBasePath = cacheBasePath;
+            _mediaProvider = mediaProvider;
 
             Title = $"Edit description — {gameName}";
             StatusText.Text = "Saved to PlayGif's cached description. " +
@@ -53,6 +59,9 @@ namespace PlayGif.Views
                 s.IsStatusBarEnabled = false;
                 s.AreDefaultContextMenusEnabled = true;   // cut/copy/paste
                 s.IsZoomControlEnabled = false;
+                s.IsWebMessageEnabled = true;
+
+                core.WebMessageReceived += OnWebMessageReceived;
 
                 // Same virtual host as the renderer, so cached media resolves and
                 // animates inside the editor exactly as it will in the description
@@ -84,6 +93,34 @@ namespace PlayGif.Views
                 MessageBox.Show($"Could not open the editor: {ex.Message}",
                     Constants.PluginName, MessageBoxButton.OK, MessageBoxImage.Error);
                 DialogResult = false;
+            }
+        }
+
+        // The editor asks for media; the plugin fetches it and the finished tag is
+        // inserted at the caret the editor saved before the dialog took focus.
+        private async void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
+        {
+            try
+            {
+                var raw = e.TryGetWebMessageAsString();
+                if (string.IsNullOrEmpty(raw)) return;
+
+                var msg = Newtonsoft.Json.Linq.JObject.Parse(raw);
+                if (msg["type"]?.ToString() != "insert") return;
+                if (_mediaProvider == null) return;
+
+                var source = msg["source"]?.ToString();
+                var tag = await _mediaProvider(source);
+                if (string.IsNullOrEmpty(tag)) return;
+
+                var escaped = JsonConvert.SerializeObject(tag);
+                await Editor.CoreWebView2.ExecuteScriptAsync($"insertHtml({escaped})");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Editor media insert failed");
+                MessageBox.Show($"Could not insert media: {ex.Message}",
+                    Constants.PluginName, MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
