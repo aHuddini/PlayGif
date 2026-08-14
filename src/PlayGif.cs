@@ -1315,24 +1315,6 @@ namespace PlayGif
                 items.Add(new GameMenuItem
                 {
                     MenuSection = section,
-                    Description = "Local file",
-                    Action = (menuArgs) =>
-                    {
-                        var game = menuArgs.Games.FirstOrDefault();
-                        if (game == null) return;
-
-                        var filePath = _api.Dialogs.SelectFile(
-                            "Media files|*.gif;*.mp4;*.webp;*.apng;*.avif;*.png;*.jpg|All files|*.*");
-                        if (string.IsNullOrEmpty(filePath)) return;
-
-                        var tag = CopyAndBuildMediaTag(game, filePath);
-                        if (tag != null) InsertMediaTag(game, tag, pos);
-                    }
-                });
-
-                items.Add(new GameMenuItem
-                {
-                    MenuSection = section,
                     Description = "From URL",
                     Action = (menuArgs) =>
                     {
@@ -1345,6 +1327,24 @@ namespace PlayGif
                             string.IsNullOrWhiteSpace(input.SelectedString)) return;
 
                         DownloadAndInsertMedia(game, input.SelectedString.Trim(), pos);
+                    }
+                });
+
+                items.Add(new GameMenuItem
+                {
+                    MenuSection = section,
+                    Description = "Local file",
+                    Action = (menuArgs) =>
+                    {
+                        var game = menuArgs.Games.FirstOrDefault();
+                        if (game == null) return;
+
+                        var filePath = _api.Dialogs.SelectFile(
+                            "Media files|*.gif;*.mp4;*.webp;*.apng;*.avif;*.png;*.jpg|All files|*.*");
+                        if (string.IsNullOrEmpty(filePath)) return;
+
+                        var tag = CopyAndBuildMediaTag(game, filePath);
+                        if (tag != null) InsertMediaTag(game, tag, pos);
                     }
                 });
             }
