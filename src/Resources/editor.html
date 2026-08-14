@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+    :root {
+        --bg: #16161e;
+        --panel: #1d1d27;
+        --text: #e6e6ef;
+        --muted: #8a8a9e;
+        --border: #33334a;
+        --accent: #3B82F6;
+    }
+    html, body {
+        margin: 0; padding: 0; height: 100%;
+        background: var(--bg); color: var(--text);
+        font-family: 'Segoe UI', sans-serif; font-size: 14px;
+        overflow: hidden;
+    }
+    #toolbar {
+        display: flex; align-items: center; gap: 4px;
+        padding: 8px; background: var(--panel);
+        border-bottom: 1px solid var(--border);
+        flex-wrap: wrap;
+    }
+    #toolbar button {
+        background: transparent; color: var(--text);
+        border: 1px solid transparent; border-radius: 4px;
+        padding: 5px 9px; cursor: pointer; font-size: 13px;
+        min-width: 30px;
+    }
+    #toolbar button:hover { background: #2a2a3a; border-color: var(--border); }
+    #toolbar button.active { background: var(--accent); border-color: var(--accent); }
+    .sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+    .spacer { flex: 1; }
+
+    #editor, #source {
+        position: absolute; top: 45px; bottom: 0; left: 0; right: 0;
+        padding: 16px; overflow-y: auto; box-sizing: border-box;
+    }
+    #editor:focus { outline: none; }
+    #editor img, #editor video { max-width: 100%; height: auto; display: block; margin: 6px 0; }
+    #editor a { color: #60A5FA; }
+
+    /* Media is easy to select and delete when its bounds are visible */
+    #editor img:hover, #editor video:hover { outline: 2px solid var(--accent); }
+
+    #source {
+        display: none; background: #101018; color: #c8c8d8;
+        font-family: Consolas, monospace; font-size: 13px;
+        border: none; resize: none; white-space: pre-wrap;
+    }
+    #source:focus { outline: none; }
+    .hint { color: var(--muted); font-size: 12px; margin-left: 6px; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+    <button onclick="cmd('bold')" id="b-bold" title="Bold"><b>B</b></button>
+    <button onclick="cmd('italic')" id="b-italic" title="Italic"><i>I</i></button>
+    <button onclick="cmd('underline')" id="b-underline" title="Underline"><u>U</u></button>
+    <div class="sep"></div>
+    <button onclick="cmd('insertUnorderedList')" title="Bulleted list">&#8226; List</button>
+    <button onclick="cmd('formatBlock','<h3>')" title="Heading">H</button>
+    <button onclick="makeLink()" title="Insert link">Link</button>
+    <div class="sep"></div>
+    <button onclick="cmd('undo')" title="Undo">&#8630;</button>
+    <button onclick="cmd('redo')" title="Redo">&#8631;</button>
+    <div class="spacer"></div>
+    <span class="hint" id="hint">Media plays while you edit. Click it to select, Delete to remove.</span>
+    <button onclick="toggleSource()" id="b-source" title="Edit raw HTML">&lt;/&gt; HTML</button>
+</div>
+
+<div id="editor" contenteditable="true"></div>
+<textarea id="source" spellcheck="false"></textarea>
+
+<script>
+    var showingSource = false;
+
+    function cmd(name, arg) {
+        if (showingSource) return;
+        document.getElementById('editor').focus();
+        document.execCommand(name, false, arg || null);
+        updateState();
+    }
+
+    function makeLink() {
+        if (showingSource) return;
+        var url = prompt('Link URL:', 'https://');
+        if (url) cmd('createLink', url);
+    }
+
+    // The editable surface and the raw HTML are two views of the same content;
+    // switching syncs whichever one was being edited into the other.
+    function toggleSource() {
+        var ed = document.getElementById('editor');
+        var src = document.getElementById('source');
+        var btn = document.getElementById('b-source');
+
+        if (showingSource) {
+            ed.innerHTML = src.value;
+            src.style.display = 'none';
+            ed.style.display = 'block';
+            btn.classList.remove('active');
+            document.getElementById('hint').textContent =
+                'Media plays while you edit. Click it to select, Delete to remove.';
+        } else {
+            src.value = ed.innerHTML;
+            ed.style.display = 'none';
+            src.style.display = 'block';
+            btn.classList.add('active');
+            document.getElementById('hint').textContent = 'Editing raw HTML.';
+        }
+        showingSource = !showingSource;
+    }
+
+    function updateState() {
+        ['bold','italic','underline'].forEach(function (c) {
+            var b = document.getElementById('b-' + c);
+            if (!b) return;
+            try {
+                if (document.queryCommandState(c)) b.classList.add('active');
+                else b.classList.remove('active');
+            } catch (e) {}
+        });
+    }
+
+    document.addEventListener('selectionchange', updateState);
+
+    // Paste as plain text, so copying from a browser does not drag in
+    // stylesheets and layout that break the description
+    document.getElementById('editor').addEventListener('paste', function (e) {
+        e.preventDefault();
+        var text = (e.clipboardData || window.clipboardData).getData('text/plain');
+        document.execCommand('insertText', false, text);
+    });
+
+    // Called from C#
+    function setContent(html) {
+        document.getElementById('editor').innerHTML = html;
+        document.getElementById('source').value = html;
+    }
+
+    function getContent() {
+        return showingSource
+            ? document.getElementById('source').value
+            : document.getElementById('editor').innerHTML;
+    }
+</script>
+</body>
+</html>

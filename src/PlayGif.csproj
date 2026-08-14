@@ -34,6 +34,7 @@
 
     <ItemGroup>
         <EmbeddedResource Include="Resources\shell.html" />
+        <EmbeddedResource Include="Resources\editor.html" />
     </ItemGroup>
 
     <ItemGroup>

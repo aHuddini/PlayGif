@@ -753,6 +753,53 @@ namespace PlayGif
             }
         }
 
+        // Opens the description in a WYSIWYG editor. Edits are written to PlayGif's
+        // cached description, which is what the renderer displays.
+        private async void EditDescription(Game game)
+        {
+            try
+            {
+                if (_steamService == null)
+                {
+                    var basePath = GetPluginUserDataPath();
+                    _steamService = new SteamDescriptionService(
+                        basePath, () => _api.ApplicationSettings.Language);
+                }
+
+                // Load whatever is actually being displayed: the cached rich
+                // description when one exists, otherwise Playnite's own text.
+                string html;
+                if (_steamService.HasCachedDescription(game.Id))
+                    html = await _steamService.GetRichDescriptionAsync(game) ?? "";
+                else
+                    html = game.Description ?? "";
+
+                var window = new Views.DescriptionEditorWindow(
+                    html, game.Id, GetPluginUserDataPath(), game.Name)
+                {
+                    Owner = Application.Current.MainWindow
+                };
+
+                if (window.ShowDialog() != true) return;
+
+                var edited = window.ResultHtml ?? "";
+
+                // Saving always writes the cached copy, creating it when the game
+                // had none — otherwise editing a plain-metadata game would appear
+                // to do nothing, since the cache is what the renderer reads.
+                _steamService.SaveCachedDescription(game.Id, edited);
+                Logger.Info($"Saved edited description for {game.Name} ({edited.Length} chars)");
+
+                if (_lastSelectedGame?.Id == game.Id) TryInjectAndRender(game);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, $"Failed to edit description for {game.Name}");
+                _api.Dialogs.ShowMessage(
+                    $"Could not edit the description: {ex.Message}", Constants.PluginName);
+            }
+        }
+
         // Standalone repair for users who converted before this existed, or whose
         // descriptions reference media that is no longer on disk.
         public void RunDescriptionRepair()
@@ -1304,6 +1351,17 @@ namespace PlayGif
             items.Add(new GameMenuItem
             {
                 MenuSection = Constants.MenuSectionName,
+                Description = "Edit description...",
+                Action = (menuArgs) =>
+                {
+                    var game = menuArgs.Games.FirstOrDefault();
+                    if (game != null) EditDescription(game);
+                }
+            });
+
+            items.Add(new GameMenuItem
+            {
+                MenuSection = Constants.MenuSectionName,
                 Description = "Remove media...",
                 Action = (menuArgs) =>
                 {
@@ -1319,6 +1377,16 @@ namespace PlayGif
                 Action = (menuArgs) =>
                 {
                     if (_cacheService == null) return;
+
+                    // Edits made with "Edit description" live in the cached copy,
+                    // so refreshing throws them away. Say so before doing it.
+                    var confirm = _api.Dialogs.ShowMessage(
+                        "Re-fetch the description and clear cached media?\n\n" +
+                        "Any changes made with \"Edit description\" will be lost.",
+                        Constants.PluginName,
+                        MessageBoxButton.YesNo);
+                    if (confirm != MessageBoxResult.Yes) return;
+
                     foreach (var game in menuArgs.Games)
                     {
                         _cacheService.ClearGameCache(game.Id);
