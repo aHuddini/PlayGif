@@ -869,16 +869,18 @@ namespace PlayGif
             try
             {
                 var uri = new Uri(url);
-                var fileName = SanitizeFileName(System.IO.Path.GetFileName(uri.AbsolutePath));
-                if (string.IsNullOrEmpty(fileName) || !fileName.Contains("."))
-                    fileName = "media" + (url.Contains(".webm") ? ".webm" : url.Contains(".gif") ? ".gif" : ".mp4");
+                var baseName = SanitizeFileName(System.IO.Path.GetFileName(uri.AbsolutePath));
+                if (string.IsNullOrEmpty(baseName)) baseName = "media";
 
                 var gameDir = System.IO.Path.Combine(
                     GetPluginUserDataPath(), Common.Constants.GamesCacheFolder, game.Id.ToString());
                 System.IO.Directory.CreateDirectory(gameDir);
-                var destPath = System.IO.Path.Combine(gameDir, fileName);
 
-                await MediaCacheService.DownloadToFileAsync(url, destPath);
+                // The real format comes from the response, not the URL. Image hosts
+                // routinely serve a GIF from a path with no extension; guessing gave
+                // .mp4 and wrapped it in a <video> that could not decode, which is
+                // why added media showed as an empty gap.
+                var fileName = await MediaCacheService.DownloadAndDetectAsync(url, gameDir, baseName);
 
                 var localUrl = $"https://{Common.Constants.VirtualHostName}/{game.Id}/{fileName}";
                 var ext = System.IO.Path.GetExtension(fileName).ToLowerInvariant();

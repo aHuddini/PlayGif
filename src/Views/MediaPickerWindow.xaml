@@ -29,8 +29,26 @@
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <StackPanel Width="160" Margin="4">
-                        <Image Source="{Binding ThumbUrl}" Height="120"
-                               Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+                        <Grid>
+                            <Image Source="{Binding ThumbUrl}" Height="120"
+                                   Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+                            <!-- Format badge, so it is clear what will be downloaded -->
+                            <Border HorizontalAlignment="Right" VerticalAlignment="Top"
+                                    Margin="4" Padding="5,1" CornerRadius="3" Opacity="0.92">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="#555"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsAnimated}" Value="True">
+                                                <Setter Property="Background" Value="#2563EB"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Text="{Binding Format}" Foreground="White"
+                                           FontSize="10" FontWeight="Bold"/>
+                            </Border>
+                        </Grid>
                         <TextBlock Text="{Binding Size}" Foreground="#aaa"
                                    FontSize="10" HorizontalAlignment="Center" Margin="0,2,0,0"/>
                     </StackPanel>

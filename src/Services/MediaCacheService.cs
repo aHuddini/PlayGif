@@ -297,6 +297,124 @@ namespace PlayGif.Services
             File.WriteAllBytes(destPath, bytes);
         }
 
+        // Downloads and returns the extension the bytes actually are, rather than
+        // whatever the URL implied. Many image hosts serve a GIF from a path with
+        // no extension at all; guessing from the URL produced .mp4, which was then
+        // wrapped in a <video> the browser could not decode.
+        public static async Task<string> DownloadAndDetectAsync(string url, string destDirectory,
+                                                                string baseName)
+        {
+            url = ResolveMediaUrl(url);
+
+            using (var response = await HttpClient.GetAsync(url))
+            {
+                response.EnsureSuccessStatusCode();
+                var bytes = await response.Content.ReadAsByteArrayAsync();
+
+                var ext = ExtensionFromSignature(bytes)
+                    ?? ExtensionFromContentType(response.Content.Headers.ContentType?.MediaType)
+                    ?? Path.GetExtension(baseName);
+
+                // A page instead of media — .gifv and similar wrappers serve HTML.
+                // Saving it would produce a file that renders as an empty gap.
+                if (ext == null || ext == ".html" || ext == ".htm" || LooksLikeHtml(bytes))
+                    throw new InvalidOperationException(
+                        "That link returns a web page rather than an image or video. " +
+                        "Open it in a browser, right-click the image and copy its direct address.");
+
+                if (string.IsNullOrEmpty(ext)) ext = ".bin";
+
+                var fileName = Path.GetFileNameWithoutExtension(baseName) + ext;
+                var destPath = Path.Combine(destDirectory, fileName);
+                File.WriteAllBytes(destPath, bytes);
+                return fileName;
+            }
+        }
+
+        // .gifv is not a format. Imgur invented it: the URL ends .gifv but the
+        // response is an HTML page wrapping an MP4. Requesting the .mp4 directly
+        // gets the actual animation the user picked.
+        public static string ResolveMediaUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return url;
+
+            var q = url.IndexOf('?');
+            var path = q >= 0 ? url.Substring(0, q) : url;
+            var query = q >= 0 ? url.Substring(q) : "";
+
+            if (path.EndsWith(".gifv", StringComparison.OrdinalIgnoreCase))
+                return path.Substring(0, path.Length - 5) + ".mp4" + query;
+
+            return url;
+        }
+
+        private static bool LooksLikeHtml(byte[] b)
+        {
+            if (b == null || b.Length < 15) return false;
+            var head = System.Text.Encoding.ASCII.GetString(b, 0, Math.Min(b.Length, 512))
+                .TrimStart().ToLowerInvariant();
+            return head.StartsWith("<!doctype html") || head.StartsWith("<html") ||
+                   head.StartsWith("<?xml") && head.Contains("<html");
+        }
+
+        // Magic bytes are authoritative — a server can mislabel Content-Type, and
+        // some hosts return application/octet-stream for everything.
+        private static string ExtensionFromSignature(byte[] b)
+        {
+            if (b == null || b.Length < 12) return null;
+
+            if (b[0] == 'G' && b[1] == 'I' && b[2] == 'F') return ".gif";
+            if (b[0] == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G')
+                return HasApngChunk(b) ? ".apng" : ".png";
+            if (b[0] == 0xFF && b[1] == 0xD8) return ".jpg";
+
+            // RIFF....WEBP
+            if (b[0] == 'R' && b[1] == 'I' && b[2] == 'F' && b[3] == 'F' &&
+                b[8] == 'W' && b[9] == 'E' && b[10] == 'B' && b[11] == 'P') return ".webp";
+
+            // ....ftyp — ISO base media (mp4/m4v/avif/heic)
+            if (b[4] == 'f' && b[5] == 't' && b[6] == 'y' && b[7] == 'p')
+            {
+                var brand = System.Text.Encoding.ASCII.GetString(b, 8, 4);
+                if (brand.StartsWith("avif") || brand.StartsWith("avis")) return ".avif";
+                return ".mp4";
+            }
+
+            // EBML header — WebM/Matroska
+            if (b[0] == 0x1A && b[1] == 0x45 && b[2] == 0xDF && b[3] == 0xA3) return ".webm";
+
+            return null;
+        }
+
+        // A PNG is animated only if it carries an acTL chunk before the first IDAT
+        private static bool HasApngChunk(byte[] b)
+        {
+            var limit = Math.Min(b.Length - 4, 4096);
+            for (int i = 8; i < limit; i++)
+            {
+                if (b[i] == 'I' && b[i + 1] == 'D' && b[i + 2] == 'A' && b[i + 3] == 'T') return false;
+                if (b[i] == 'a' && b[i + 1] == 'c' && b[i + 2] == 'T' && b[i + 3] == 'L') return true;
+            }
+            return false;
+        }
+
+        private static string ExtensionFromContentType(string mediaType)
+        {
+            if (string.IsNullOrEmpty(mediaType)) return null;
+            switch (mediaType.ToLowerInvariant())
+            {
+                case "image/gif": return ".gif";
+                case "image/png": return ".png";
+                case "image/apng": return ".apng";
+                case "image/jpeg": return ".jpg";
+                case "image/webp": return ".webp";
+                case "image/avif": return ".avif";
+                case "video/mp4": return ".mp4";
+                case "video/webm": return ".webm";
+                default: return null;
+            }
+        }
+
         public async Task DownloadAllAsync(List<(string url, string localPath)> items, Guid gameId)
         {
             var gameDir = GetGameCacheDir(gameId);
