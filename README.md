@@ -82,7 +82,8 @@ Right-click any game for the **PlayGif** menu:
 |---|---|
 | **Add media** | Insert a local file, a URL, or a web image search result at the top or bottom of the description |
 | **Remove media** | Pick a media file to remove; it is stripped from the description too |
-| **Refresh description** | Clears the cache and re-fetches, for when a description looks wrong |
+| **Edit description** | Opens the description in a WYSIWYG editor — media plays while you edit. Includes a raw HTML view |
+| **Reset description** | Discards the cached description and all cached media, then re-fetches from the store. Cannot be undone |
 | **Video scale** | Set 25/50/75% for this game, or reset to the global default |
 | **Fetch description** | Pull a rich description from Steam or GOG |
 
