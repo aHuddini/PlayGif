@@ -1299,6 +1299,19 @@ namespace PlayGif
                 var section = Constants.MenuSectionName + "|Add media|" +
                     (pos == "top" ? "To top" : "To bottom");
 
+                // Web search first — it is the most-used way to add media
+                items.Add(new GameMenuItem
+                {
+                    MenuSection = section,
+                    Description = "Search web images",
+                    Action = (menuArgs) =>
+                    {
+                        var game = menuArgs.Games.FirstOrDefault();
+                        if (game == null) return;
+                        SearchWebImages(game, pos);
+                    }
+                });
+
                 items.Add(new GameMenuItem
                 {
                     MenuSection = section,
@@ -1334,18 +1347,6 @@ namespace PlayGif
                         DownloadAndInsertMedia(game, input.SelectedString.Trim(), pos);
                     }
                 });
-
-                items.Add(new GameMenuItem
-                {
-                    MenuSection = section,
-                    Description = "Search web images",
-                    Action = (menuArgs) =>
-                    {
-                        var game = menuArgs.Games.FirstOrDefault();
-                        if (game == null) return;
-                        SearchWebImages(game, pos);
-                    }
-                });
             }
 
             items.Add(new GameMenuItem
@@ -1373,16 +1374,23 @@ namespace PlayGif
             items.Add(new GameMenuItem
             {
                 MenuSection = Constants.MenuSectionName,
-                Description = "Refresh description",
+                Description = "Reset description",
                 Action = (menuArgs) =>
                 {
                     if (_cacheService == null) return;
 
-                    // Edits made with "Edit description" live in the cached copy,
-                    // so refreshing throws them away. Say so before doing it.
+                    // This discards the cached description and every cached media
+                    // file, including anything added or edited by hand. Name and
+                    // wording say so, because it is not recoverable.
+                    var count = menuArgs.Games.Count;
                     var confirm = _api.Dialogs.ShowMessage(
-                        "Re-fetch the description and clear cached media?\n\n" +
-                        "Any changes made with \"Edit description\" will be lost.",
+                        (count == 1
+                            ? "Reset this game's description?\n\n"
+                            : $"Reset the description for {count} games?\n\n") +
+                        "This discards the cached description and all cached media, " +
+                        "including media you added and any changes made with " +
+                        "\"Edit description\". The description is re-fetched from the " +
+                        "store as you browse.\n\nThis cannot be undone.",
                         Constants.PluginName,
                         MessageBoxButton.YesNo);
                     if (confirm != MessageBoxResult.Yes) return;
@@ -1395,7 +1403,7 @@ namespace PlayGif
                     if (_renderer?.IsInitialized == true && _lastSelectedGame != null)
                         TryInjectAndRender(_lastSelectedGame);
                     _api.Dialogs.ShowMessage(
-                        "Description refreshed. Media will reload as you browse.",
+                        "Description reset. It will re-fetch as you browse.",
                         Constants.PluginName);
                 }
             });
