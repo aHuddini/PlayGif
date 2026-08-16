@@ -20,6 +20,7 @@ namespace PlayGif.Views
         private readonly Func<string, Task<string>> _mediaProvider;
         private readonly CoreWebView2Environment _sharedEnvironment;
         private bool _ready;
+        private bool _inserting;
 
         public string ResultHtml { get; private set; }
 
@@ -109,8 +110,9 @@ namespace PlayGif.Views
 
         // The editor asks for media; the plugin fetches it and the finished tag is
         // inserted at the caret the editor saved before the dialog took focus.
-        private async void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
+        private void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
         {
+            string source;
             try
             {
                 var raw = e.TryGetWebMessageAsString();
@@ -120,9 +122,33 @@ namespace PlayGif.Views
                 if (msg["type"]?.ToString() != "insert") return;
                 if (_mediaProvider == null) return;
 
-                var source = msg["source"]?.ToString();
+                source = msg["source"]?.ToString();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Could not read the editor message");
+                return;
+            }
+
+            // Must not open a dialog from inside the WebView2 message callback.
+            // Doing so re-enters the WPF dispatcher from the browser's message
+            // pump, and the picker spins up a third WebView while this one is
+            // live — that combination wedged the compositor and blacked out the
+            // main window. Hand off and let the callback return first.
+            Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.Background,
+                new Action(async () => await InsertMediaAsync(source)));
+        }
+
+        private async Task InsertMediaAsync(string source)
+        {
+            if (_inserting) return;   // ignore repeat clicks while a picker is open
+            _inserting = true;
+            try
+            {
                 var tag = await _mediaProvider(source);
                 if (string.IsNullOrEmpty(tag)) return;
+                if (Editor?.CoreWebView2 == null) return;
 
                 var escaped = JsonConvert.SerializeObject(tag);
                 await Editor.CoreWebView2.ExecuteScriptAsync($"insertHtml({escaped})");
@@ -132,6 +158,10 @@ namespace PlayGif.Views
                 Logger.Error(ex, "Editor media insert failed");
                 MessageBox.Show($"Could not insert media: {ex.Message}",
                     Constants.PluginName, MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                _inserting = false;
             }
         }
 
@@ -167,24 +197,29 @@ namespace PlayGif.Views
             DialogResult = false;
         }
 
-        protected override void OnClosed(EventArgs e)
+        // Tear the WebView2 down while the window still exists. Disposing it after
+        // the window is gone detaches its HWND from a destroyed parent, which can
+        // leave the main window's rendering broken.
+        protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
         {
+            base.OnClosing(e);
+            if (e.Cancel) return;
+
             try
             {
                 if (Editor?.CoreWebView2 != null)
                     Editor.CoreWebView2.WebMessageReceived -= OnWebMessageReceived;
 
-                // Dispose after the window has finished closing. Tearing the
-                // control down mid-close can drop the shared GPU device while WPF
-                // is still compositing this frame, which blanks the main window.
-                var control = Editor;
-                Dispatcher.BeginInvoke(
-                    System.Windows.Threading.DispatcherPriority.ApplicationIdle,
-                    new Action(() => { try { control?.Dispose(); } catch { } }));
-            }
-            catch { }
+                // Detach from the visual tree first so WPF stops compositing it
+                if (Editor?.Parent is System.Windows.Controls.Border host)
+                    host.Child = null;
 
-            base.OnClosed(e);
+                Editor?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Editor teardown failed");
+            }
         }
     }
 }
