@@ -29,6 +29,11 @@ namespace PlayGif.Services
         public WebView2 WebViewControl => _webView;
         public bool IsInitialized => _isInitialized;
 
+        // Shared with the description editor. Creating a second environment with
+        // different GPU options leaves the shared compositor in a bad state when
+        // one of them is torn down, which blanks everything WPF draws.
+        public CoreWebView2Environment Environment => _environment;
+
         public DescriptionRendererService(PlayGifSettings settings, Func<string> cacheBasePathProvider)
         {
             _settings = settings;

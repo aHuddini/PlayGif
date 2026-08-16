@@ -18,6 +18,7 @@ namespace PlayGif.Views
         private readonly Guid _gameId;
         private readonly string _cacheBasePath;
         private readonly Func<string, Task<string>> _mediaProvider;
+        private readonly CoreWebView2Environment _sharedEnvironment;
         private bool _ready;
 
         public string ResultHtml { get; private set; }
@@ -26,7 +27,8 @@ namespace PlayGif.Views
         // insert, or null if cancelled. Supplied by the plugin so the editor reuses
         // the same download, format-detection and caching paths as the menu.
         public DescriptionEditorWindow(string html, Guid gameId, string cacheBasePath, string gameName,
-                                       Func<string, Task<string>> mediaProvider = null)
+                                       Func<string, Task<string>> mediaProvider = null,
+                                       CoreWebView2Environment sharedEnvironment = null)
         {
             InitializeComponent();
 
@@ -34,6 +36,7 @@ namespace PlayGif.Views
             _gameId = gameId;
             _cacheBasePath = cacheBasePath;
             _mediaProvider = mediaProvider;
+            _sharedEnvironment = sharedEnvironment;
 
             Title = $"Edit description — {gameName}";
             StatusText.Text = "Saved to PlayGif's cached description. " +
@@ -46,11 +49,19 @@ namespace PlayGif.Views
         {
             try
             {
-                // Its own user data folder so it cannot disturb the renderer's
-                var userData = Path.Combine(_cacheBasePath, "EditorWebView2");
-                Directory.CreateDirectory(userData);
+                // Reuse the renderer's environment. A second environment created
+                // with different GPU options shares the same GPU process, and
+                // tearing one down could leave WPF's own hardware rendering on a
+                // dead device — the window went black while the WebView2 HWND,
+                // which composites separately, kept drawing.
+                var env = _sharedEnvironment;
+                if (env == null)
+                {
+                    var userData = Path.Combine(_cacheBasePath, "WebView2Data");
+                    Directory.CreateDirectory(userData);
+                    env = await CoreWebView2Environment.CreateAsync(null, userData);
+                }
 
-                var env = await CoreWebView2Environment.CreateAsync(null, userData);
                 await Editor.EnsureCoreWebView2Async(env);
 
                 var core = Editor.CoreWebView2;
@@ -158,7 +169,21 @@ namespace PlayGif.Views
 
         protected override void OnClosed(EventArgs e)
         {
-            try { Editor?.Dispose(); } catch { }
+            try
+            {
+                if (Editor?.CoreWebView2 != null)
+                    Editor.CoreWebView2.WebMessageReceived -= OnWebMessageReceived;
+
+                // Dispose after the window has finished closing. Tearing the
+                // control down mid-close can drop the shared GPU device while WPF
+                // is still compositing this frame, which blanks the main window.
+                var control = Editor;
+                Dispatcher.BeginInvoke(
+                    System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                    new Action(() => { try { control?.Dispose(); } catch { } }));
+            }
+            catch { }
+
             base.OnClosed(e);
         }
     }

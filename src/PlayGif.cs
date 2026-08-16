@@ -73,6 +73,20 @@ namespace PlayGif
                 var basePath = GetPluginUserDataPath();
                 Logger.Info($"Plugin data path: {basePath}");
 
+                // Earlier builds gave the editor its own WebView2 profile, which
+                // conflicted with the renderer's GPU settings. It shares the
+                // renderer's environment now, so the old profile is dead weight.
+                try
+                {
+                    var stale = System.IO.Path.Combine(basePath, "EditorWebView2");
+                    if (System.IO.Directory.Exists(stale))
+                    {
+                        System.IO.Directory.Delete(stale, true);
+                        Logger.Info("Removed the obsolete editor WebView2 profile.");
+                    }
+                }
+                catch (Exception ex) { Logger.Error(ex, "Could not remove the old editor profile"); }
+
                 _cacheService = new MediaCacheService(Settings, basePath);
                 _steamService = new SteamDescriptionService(basePath, () => _api.ApplicationSettings.Language);
                 _renderer = new DescriptionRendererService(Settings, () => basePath);
@@ -806,7 +820,8 @@ namespace PlayGif
 
                 var window = new Views.DescriptionEditorWindow(
                     html, game.Id, GetPluginUserDataPath(), game.Name,
-                    (source) => ProvideMediaTagAsync(game, source))
+                    (source) => ProvideMediaTagAsync(game, source),
+                    _renderer?.Environment)
                 {
                     Owner = Application.Current.MainWindow
                 };
@@ -821,7 +836,18 @@ namespace PlayGif
                 _steamService.SaveCachedDescription(game.Id, edited);
                 Logger.Info($"Saved edited description for {game.Name} ({edited.Length} chars)");
 
-                if (_lastSelectedGame?.Id == game.Id) TryInjectAndRender(game);
+                // Re-render once the modal has fully closed and the main window has
+                // laid out again; doing it inline re-clips against stale geometry.
+                if (_lastSelectedGame?.Id == game.Id)
+                {
+                    Application.Current.Dispatcher.BeginInvoke(
+                        DispatcherPriority.ApplicationIdle,
+                        new Action(() =>
+                        {
+                            _viewMonitor?.RefreshClip();
+                            TryInjectAndRender(game);
+                        }));
+                }
             }
             catch (Exception ex)
             {
