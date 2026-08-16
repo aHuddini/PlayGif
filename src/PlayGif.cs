@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -71,6 +72,20 @@ namespace PlayGif
             {
                 var basePath = GetPluginUserDataPath();
                 Logger.Info($"Plugin data path: {basePath}");
+
+                // Earlier builds gave the editor its own WebView2 profile, which
+                // conflicted with the renderer's GPU settings. It shares the
+                // renderer's environment now, so the old profile is dead weight.
+                try
+                {
+                    var stale = System.IO.Path.Combine(basePath, "EditorWebView2");
+                    if (System.IO.Directory.Exists(stale))
+                    {
+                        System.IO.Directory.Delete(stale, true);
+                        Logger.Info("Removed the obsolete editor WebView2 profile.");
+                    }
+                }
+                catch (Exception ex) { Logger.Error(ex, "Could not remove the old editor profile"); }
 
                 _cacheService = new MediaCacheService(Settings, basePath);
                 _steamService = new SteamDescriptionService(basePath, () => _api.ApplicationSettings.Language);
@@ -753,6 +768,78 @@ namespace PlayGif
             }
         }
 
+        // Themes dim the main window whenever it owns a child window, through a
+        // HasChildWindow trigger that sets Opacity to 0.4. Playnite only
+        // re-evaluates that property when it explicitly notifies, so a window we
+        // open and close on our own leaves the UI dimmed until some other dialog
+        // happens to refresh it — which is why opening Playnite's settings and
+        // closing it restored the display.
+        private void RefreshOwnerChildState()
+        {
+            Application.Current?.Dispatcher.BeginInvoke(
+                DispatcherPriority.Background,
+                new Action(() =>
+                {
+                    try
+                    {
+                        // Ask Playnite to re-read OwnedWindows on every window
+                        var t = Type.GetType("Playnite.Windows.WindowManager, Playnite");
+                        var m = t?.GetMethod("NotifyChildOwnershipChanges",
+                            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                        if (m != null)
+                        {
+                            m.Invoke(null, null);
+                            return;
+                        }
+
+                        // Fallback: raise the property change ourselves so the
+                        // theme's binding re-reads it
+                        foreach (Window w in Application.Current.Windows)
+                        {
+                            var raise = w.GetType().GetMethod("OnPropertyChanged",
+                                System.Reflection.BindingFlags.Public |
+                                System.Reflection.BindingFlags.NonPublic |
+                                System.Reflection.BindingFlags.Instance,
+                                null, new[] { typeof(string) }, null);
+                            raise?.Invoke(w, new object[] { "HasChildWindow" });
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error(ex, "Could not refresh the child-window state");
+                    }
+                }));
+        }
+
+        // Backs the editor's Insert menu. Reuses the same paths as the right-click
+        // menu, so format detection, caching and virtual-host URLs all behave
+        // identically — only the insertion point differs.
+        private async Task<string> ProvideMediaTagAsync(Game game, string source)
+        {
+            switch (source)
+            {
+                case "search":
+                    var picked = PickWebImageUrl(game);
+                    return string.IsNullOrEmpty(picked)
+                        ? null : await DownloadMediaTagAsync(game, picked);
+
+                case "url":
+                    var input = _api.Dialogs.SelectString(
+                        "Enter media URL (GIF, MP4, image):", Constants.PluginName, "");
+                    if (input == null || !input.Result ||
+                        string.IsNullOrWhiteSpace(input.SelectedString)) return null;
+                    return await DownloadMediaTagAsync(game, input.SelectedString.Trim());
+
+                case "file":
+                    var path = _api.Dialogs.SelectFile(
+                        "Media files|*.gif;*.mp4;*.webp;*.apng;*.avif;*.png;*.jpg|All files|*.*");
+                    return string.IsNullOrEmpty(path) ? null : CopyAndBuildMediaTag(game, path);
+
+                default:
+                    return null;
+            }
+        }
+
         // Opens the description in a WYSIWYG editor. Edits are written to PlayGif's
         // cached description, which is what the renderer displays.
         private async void EditDescription(Game game)
@@ -775,12 +862,23 @@ namespace PlayGif
                     html = game.Description ?? "";
 
                 var window = new Views.DescriptionEditorWindow(
-                    html, game.Id, GetPluginUserDataPath(), game.Name)
+                    html, game.Id, GetPluginUserDataPath(), game.Name,
+                    (source) => ProvideMediaTagAsync(game, source),
+                    _renderer?.Environment)
                 {
                     Owner = Application.Current.MainWindow
                 };
 
-                if (window.ShowDialog() != true) return;
+                var accepted = window.ShowDialog() == true;
+
+                // Themes dim the main window while it has an owned child, via a
+                // HasChildWindow trigger (Opacity 0.4). That property is only
+                // re-evaluated when Playnite is told to, so closing our window
+                // left the whole UI dimmed until some other dialog happened to
+                // refresh it. Nudge the binding so it re-reads OwnedWindows.
+                RefreshOwnerChildState();
+
+                if (!accepted) return;
 
                 var edited = window.ResultHtml ?? "";
 
@@ -790,7 +888,18 @@ namespace PlayGif
                 _steamService.SaveCachedDescription(game.Id, edited);
                 Logger.Info($"Saved edited description for {game.Name} ({edited.Length} chars)");
 
-                if (_lastSelectedGame?.Id == game.Id) TryInjectAndRender(game);
+                // Re-render once the modal has fully closed and the main window has
+                // laid out again; doing it inline re-clips against stale geometry.
+                if (_lastSelectedGame?.Id == game.Id)
+                {
+                    Application.Current.Dispatcher.BeginInvoke(
+                        DispatcherPriority.ApplicationIdle,
+                        new Action(() =>
+                        {
+                            _viewMonitor?.RefreshClip();
+                            TryInjectAndRender(game);
+                        }));
+                }
             }
             catch (Exception ex)
             {
@@ -913,6 +1022,18 @@ namespace PlayGif
 
         private async void DownloadAndInsertMedia(Game game, string url, string position)
         {
+            var tag = await DownloadMediaTagAsync(game, url);
+            if (tag == null) return;
+
+            Application.Current.Dispatcher.Invoke(() => InsertMediaTag(game, tag, position));
+        }
+
+        // Downloads into the game's cache and returns the tag, without inserting.
+        // The editor needs the tag to place at the cursor rather than at the top
+        // or bottom, so both callers share this. Returns null on failure, having
+        // already reported it.
+        private async Task<string> DownloadMediaTagAsync(Game game, string url)
+        {
             try
             {
                 var uri = new Uri(url);
@@ -931,26 +1052,32 @@ namespace PlayGif
 
                 var localUrl = $"https://{Common.Constants.VirtualHostName}/{game.Id}/{fileName}";
                 var ext = System.IO.Path.GetExtension(fileName).ToLowerInvariant();
-                var tag = BuildMediaTag(localUrl, ext);
-
-                Application.Current.Dispatcher.Invoke(() =>
-                    InsertMediaTag(game, tag, position));
+                return BuildMediaTag(localUrl, ext);
             }
             catch (Exception ex)
             {
                 Logger.Error(ex, $"Failed to download media from: {url}");
                 Application.Current.Dispatcher.Invoke(() =>
                     _api.Dialogs.ShowMessage($"Failed to download: {ex.Message}", Constants.PluginName));
+                return null;
             }
         }
 
 
         private void SearchWebImages(Game game, string position)
         {
+            var url = PickWebImageUrl(game);
+            if (!string.IsNullOrEmpty(url)) DownloadAndInsertMedia(game, url, position);
+        }
+
+        // Runs the search and picker, returning the chosen URL without downloading.
+        // Shared with the editor, which needs to insert at the cursor instead.
+        private string PickWebImageUrl(Game game)
+        {
             var input = _api.Dialogs.SelectString(
                 "Search for images/GIFs:", Constants.PluginName, $"{game.Name} gif");
             if (input == null || !input.Result || string.IsNullOrWhiteSpace(input.SelectedString))
-                return;
+                return null;
 
             var searchTerm = input.SelectedString.Trim();
             var imageOptions = new System.Collections.Generic.List<ImageFileOption>();
@@ -1014,13 +1141,13 @@ namespace PlayGif
             {
                 Logger.Error(ex, "Web image search failed");
                 _api.Dialogs.ShowMessage($"Search failed: {ex.Message}", Constants.PluginName);
-                return;
+                return null;
             }
 
             if (imageOptions.Count == 0)
             {
                 _api.Dialogs.ShowMessage("No images found.", Constants.PluginName);
-                return;
+                return null;
             }
 
             var mediaItems = imageOptions.Select(o => new Views.MediaItem
@@ -1033,8 +1160,17 @@ namespace PlayGif
             var picker = new Views.MediaPickerWindow(mediaItems);
             picker.Title = $"Pick media for {game.Name} ({mediaItems.Count} results)";
 
-            if (picker.ShowDialog() == true && !string.IsNullOrEmpty(picker.SelectedUrl))
-                DownloadAndInsertMedia(game, picker.SelectedUrl, position);
+            // Owned so it stays above Playnite and is dimmed consistently; the
+            // refresh afterwards clears that dimming, which otherwise sticks.
+            var owner = Application.Current?.Windows.OfType<Window>()
+                .FirstOrDefault(w => w.IsActive) ?? Application.Current?.MainWindow;
+            if (owner != null && !ReferenceEquals(owner, picker)) picker.Owner = owner;
+
+            var chosen = picker.ShowDialog() == true && !string.IsNullOrEmpty(picker.SelectedUrl)
+                ? picker.SelectedUrl : null;
+
+            RefreshOwnerChildState();
+            return chosen;
         }
 
         private static string SanitizeFileName(string name)
