@@ -1,5 +1,17 @@
 AddonId: 'PlayGif.2e196d25-24d1-4db3-b732-9766c994a496'
 Packages:
+  - Version: 1.0.3
+    RequiredApiVersion: 6.16.0
+    ReleaseDate: 2026-08-15
+    PackageUrl: 'https://github.com/aHuddini/PlayGif/releases/download/1.0.3/PlayGif-1_0_3.pext'
+    Changelog:
+      - '[New Feature] Edit description: opens the description in a visual editor where media plays while you edit. Insert images and video at the cursor from web search, a URL, or a file; format text with headings, quotes, colour, alignment and lists; click any media to resize or remove it. Includes a raw HTML view.'
+      - '[Critical Fix] Animated images added from web search showed as empty gaps. The file format is now read from the download itself rather than guessed from the address, so an animation served without a file extension is no longer saved as an unplayable video.'
+      - '[Fixed] Imgur .gifv links now work; they are pages rather than media, and are fetched as the MP4 they contain. A link that returns a web page is reported instead of being saved as broken media.'
+      - '[Fixed] Playnite no longer stays dimmed after closing a PlayGif dialog, which previously looked like a modal was still open until another dialog was opened and closed.'
+      - '[Improved] Web search results show the file format on each thumbnail, highlighted when the format is animated.'
+      - '[Improved] Renamed "Refresh description" to "Reset description", which is what it does - it discards the cached description and all cached media. It now confirms first and states what is lost.'
+      - '[Improved] Add media lists Search web images first, then From URL, then Local file.'
   - Version: 1.0.2
     RequiredApiVersion: 6.16.0
     ReleaseDate: 2026-08-03

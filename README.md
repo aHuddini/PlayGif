@@ -26,21 +26,23 @@ Built with the help of Claude Code
 
 https://github.com/user-attachments/assets/90acd659-e195-446f-aeab-e5349ae84fd7
 
-## What's New - v1.0.2
-
-### Fixed
-- **Descriptions are fetched in your language.** PlayGif was always pulling English from Steam, which replaced localized descriptions with English text. It now uses your Playnite language, and caches each language separately.
+## What's New - v1.0.3
 
 ### Added
-- **Convert cached media to MP4.** Re-encodes your cached GIFs with FFmpeg. A GIF stores every frame as a full picture, so the saving is large — a 116 MB test library came out around 8 MB — and MP4 plays using your GPU where GIF does not. In **Settings → General → Cache**.
-- **Repair description links**, next to it. Points descriptions at the converted files, and clears links whose media is no longer on disk. Runs automatically after converting.
+- **Edit description.** Right-click a game → PlayGif → Edit description. A visual editor where your media plays while you edit it. Insert images and video **at the cursor** from web search, a URL, or a file; format text with headings, quotes, colour, alignment and lists; click any media to resize or remove it. There's a raw HTML view when you want precise control.
 
-### Fix attempts
-- **Descriptions reverting to plain text after restarting Playnite.** PlayGif could give up trying to attach before Playnite had finished building the description panel, so you had to click through every game again. It now keeps waiting and attaches as soon as the panel appears.
-  - Marked a *fix attempt* because it depends on startup timing that varies by machine, theme, and library size. If it still happens, please [open an issue](https://github.com/aHuddini/PlayGif/issues) with your log — see the Known Issues tab in settings.
+### Fixed
+- **Animated images added from web search showed as an empty gap.** The format is now read from the download itself rather than guessed from the address, so an animation served without a file extension is no longer saved as an unplayable video.
+- **Imgur `.gifv` links work.** Those are pages rather than media, so PlayGif fetches the MP4 they contain. A link that turns out to be a web page is reported instead of saved as broken media.
+- **Playnite no longer stays dimmed** after closing a PlayGif dialog.
+
+### Changed
+- **"Refresh description" is now "Reset description"** — it discards the cached description and all cached media, so it says so and confirms first.
+- Web search results show the file format on each thumbnail, highlighted when it's animated.
+- Add media lists **Search web images** first.
 
 ### Previous Version
-- **v1.0.1**: fixed descriptions going static when switching between Grid and Details view, added the video scale dropdown, and added the Theme Support and Known Issues settings tabs.
+- **v1.0.2**: descriptions fetched in your Playnite language, MP4 conversion for cached media, and a fix attempt for descriptions reverting after a restart.
 
 ---
 

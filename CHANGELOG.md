@@ -2,6 +2,28 @@
 
 All notable changes to PlayGif will be documented in this file.
 
+## [1.0.3] - 2026-08-15
+
+### Added
+- **Edit description** (right-click → PlayGif). Opens the description in a `contenteditable` WebView2 surface that maps the same `playgif.local` virtual host as the renderer, so media plays while being edited.
+  - **Insert at the cursor** from web image search, a direct URL, or a local file. These reuse `PickWebImageUrl` and `DownloadMediaTagAsync`, split out of the existing menu paths, so format detection and caching behave identically — only the insertion point differs.
+  - A dialog takes focus and destroys the selection, so the caret is captured before one opens and restored before inserting.
+  - Paragraph styles (heading, subheading, quote), text colour, alignment, ordered and unordered lists, horizontal rule, clear formatting, and a raw HTML view.
+  - Clicking media shows a floating bar to scale it to 25/50/75/100% or delete it. `getContent` strips the selection class so editor-only state is never saved.
+  - Edits are written to the cached description, which is what the renderer reads, creating it when the game has none.
+
+### Fixed
+- **Media added from web search rendered as an empty gap.** `DownloadAndInsertMedia` guessed the extension from the URL and defaulted to `.mp4` when the path had none. Image hosts routinely serve GIFs from extensionless CDN paths, so a GIF was saved as `media.mp4` and wrapped in a `<video>` the browser could not decode. The format now comes from the response: magic bytes first, since servers mislabel `Content-Type` and some return `application/octet-stream` for everything, then `Content-Type`, then the URL.
+- **`.gifv` links produced nothing.** It is not a format — Imgur serves an HTML page at that URL wrapping an MP4 — so the page was saved as media. `.gifv` is now rewritten to `.mp4` before fetching, and a response that is actually HTML is refused with a message explaining how to get a direct link.
+- **Playnite stayed dimmed after closing a PlayGif dialog.** Themes dim the main window while it owns a child, through a `DataTrigger` bound to `HasChildWindow` that sets `Opacity` to `0.4`. That property is only re-evaluated when `WindowManager.NotifyChildOwnershipChanges` is called; WPF does not raise it. Our dialogs opened and closed without it, so the dimming persisted until another dialog happened to refresh it. Both call sites now refresh on close, including when cancelled, via Playnite's notifier with a fallback that raises the bound property directly.
+  - The description looked unaffected because it is a WebView2 HWND composited above the dimmed WPF content.
+
+### Changed
+- **"Refresh description" is now "Reset description."** It discards the cached description and every cached media file, including media added by hand and any editor changes, so it is named accordingly and confirms first.
+- Add media is ordered Search web images, From URL, Local file.
+- Web search results show a format badge, highlighted for animated formats.
+- The editor shares the renderer's `CoreWebView2Environment` instead of creating a second one with different GPU options, and does not open dialogs from inside the WebView2 message callback.
+
 ## [1.0.2] - 2026-08-03
 
 ### Fixed
