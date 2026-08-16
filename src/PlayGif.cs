@@ -768,6 +768,49 @@ namespace PlayGif
             }
         }
 
+        // Themes dim the main window whenever it owns a child window, through a
+        // HasChildWindow trigger that sets Opacity to 0.4. Playnite only
+        // re-evaluates that property when it explicitly notifies, so a window we
+        // open and close on our own leaves the UI dimmed until some other dialog
+        // happens to refresh it — which is why opening Playnite's settings and
+        // closing it restored the display.
+        private void RefreshOwnerChildState()
+        {
+            Application.Current?.Dispatcher.BeginInvoke(
+                DispatcherPriority.Background,
+                new Action(() =>
+                {
+                    try
+                    {
+                        // Ask Playnite to re-read OwnedWindows on every window
+                        var t = Type.GetType("Playnite.Windows.WindowManager, Playnite");
+                        var m = t?.GetMethod("NotifyChildOwnershipChanges",
+                            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                        if (m != null)
+                        {
+                            m.Invoke(null, null);
+                            return;
+                        }
+
+                        // Fallback: raise the property change ourselves so the
+                        // theme's binding re-reads it
+                        foreach (Window w in Application.Current.Windows)
+                        {
+                            var raise = w.GetType().GetMethod("OnPropertyChanged",
+                                System.Reflection.BindingFlags.Public |
+                                System.Reflection.BindingFlags.NonPublic |
+                                System.Reflection.BindingFlags.Instance,
+                                null, new[] { typeof(string) }, null);
+                            raise?.Invoke(w, new object[] { "HasChildWindow" });
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error(ex, "Could not refresh the child-window state");
+                    }
+                }));
+        }
+
         // Backs the editor's Insert menu. Reuses the same paths as the right-click
         // menu, so format detection, caching and virtual-host URLs all behave
         // identically — only the insertion point differs.
@@ -826,7 +869,16 @@ namespace PlayGif
                     Owner = Application.Current.MainWindow
                 };
 
-                if (window.ShowDialog() != true) return;
+                var accepted = window.ShowDialog() == true;
+
+                // Themes dim the main window while it has an owned child, via a
+                // HasChildWindow trigger (Opacity 0.4). That property is only
+                // re-evaluated when Playnite is told to, so closing our window
+                // left the whole UI dimmed until some other dialog happened to
+                // refresh it. Nudge the binding so it re-reads OwnedWindows.
+                RefreshOwnerChildState();
+
+                if (!accepted) return;
 
                 var edited = window.ResultHtml ?? "";
 
@@ -1108,10 +1160,17 @@ namespace PlayGif
             var picker = new Views.MediaPickerWindow(mediaItems);
             picker.Title = $"Pick media for {game.Name} ({mediaItems.Count} results)";
 
-            if (picker.ShowDialog() == true && !string.IsNullOrEmpty(picker.SelectedUrl))
-                return picker.SelectedUrl;
+            // Owned so it stays above Playnite and is dimmed consistently; the
+            // refresh afterwards clears that dimming, which otherwise sticks.
+            var owner = Application.Current?.Windows.OfType<Window>()
+                .FirstOrDefault(w => w.IsActive) ?? Application.Current?.MainWindow;
+            if (owner != null && !ReferenceEquals(owner, picker)) picker.Owner = owner;
 
-            return null;
+            var chosen = picker.ShowDialog() == true && !string.IsNullOrEmpty(picker.SelectedUrl)
+                ? picker.SelectedUrl : null;
+
+            RefreshOwnerChildState();
+            return chosen;
         }
 
         private static string SanitizeFileName(string name)
