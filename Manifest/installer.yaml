@@ -1,5 +1,13 @@
 AddonId: 'PlayGif.2e196d25-24d1-4db3-b732-9766c994a496'
 Packages:
+  - Version: 1.0.4
+    RequiredApiVersion: 6.16.0
+    ReleaseDate: 2026-08-29
+    PackageUrl: 'https://github.com/aHuddini/PlayGif/releases/download/1.0.4/PlayGif-1_0_4.pext'
+    Changelog:
+      - '[Critical Fix] Descriptions you write or edit in Playnite are now shown (issue #3). Once PlayGif had fetched a store description for a game, that copy was displayed from then on, so editing the description appeared to do nothing. Your text was never overwritten in Playnite - only what was drawn on screen.'
+      - '[Improved] PlayGif no longer overrides descriptions written by other metadata extensions. If something else updates a description after PlayGif fetched one, the newer description is what you see.'
+      - '[Improved] Fetch description, Edit description and Reset description put PlayGif back in charge of a game whose description has since been changed. Games with no description of their own still get a rich store description fetched automatically, as before.'
   - Version: 1.0.3
     RequiredApiVersion: 6.16.0
     ReleaseDate: 2026-08-15

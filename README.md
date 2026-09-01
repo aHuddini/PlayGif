@@ -26,23 +26,15 @@ Built with the help of Claude Code
 
 https://github.com/user-attachments/assets/90acd659-e195-446f-aeab-e5349ae84fd7
 
-## What's New - v1.0.3
-
-### Added
-- **Edit description.** Right-click a game → PlayGif → Edit description. A visual editor where your media plays while you edit it. Insert images and video **at the cursor** from web search, a URL, or a file; format text with headings, quotes, colour, alignment and lists; click any media to resize or remove it. There's a raw HTML view when you want precise control.
+## What's New - v1.0.4
 
 ### Fixed
-- **Animated images added from web search showed as an empty gap.** The format is now read from the download itself rather than guessed from the address, so an animation served without a file extension is no longer saved as an unplayable video.
-- **Imgur `.gifv` links work.** Those are pages rather than media, so PlayGif fetches the MP4 they contain. A link that turns out to be a web page is reported instead of saved as broken media.
-- **Playnite no longer stays dimmed** after closing a PlayGif dialog.
-
-### Changed
-- **"Refresh description" is now "Reset description"** — it discards the cached description and all cached media, so it says so and confirms first.
-- Web search results show the file format on each thumbnail, highlighted when it's animated.
-- Add media lists **Search web images** first.
+- **Your own description now wins.** If you write or edit a game's description in Playnite, PlayGif shows it. Previously, once PlayGif had fetched a store description for a game, that copy was shown from then on and your edits appeared to do nothing — your text was always safe in Playnite, but you never saw it.
+- **PlayGif plays nicely with other metadata extensions.** If something else updates a description after PlayGif has fetched one — an AI description generator, for example — the new description is what you see.
+- Nothing changes for games you haven't touched: PlayGif still fetches rich store descriptions automatically, and **Fetch description**, **Edit description** and **Reset description** all put PlayGif back in charge of a game whose description you've since changed.
 
 ### Previous Version
-- **v1.0.2**: descriptions fetched in your Playnite language, MP4 conversion for cached media, and a fix attempt for descriptions reverting after a restart.
+- **v1.0.3**: the **Edit description** visual editor, a fix for web-search media showing as an empty gap, working Imgur `.gifv` links, and no more dimmed Playnite window after closing a dialog.
 
 ---
 

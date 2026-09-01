@@ -41,7 +41,8 @@ namespace PlayGif
                 (game) =>
                 {
                     if (_lastSelectedGame?.Id == game.Id) TryInjectAndRender(game);
-                }));
+                },
+                (game, html) => UpdateStoredDescription(game, html)));
 
         public override Guid Id { get; } = Guid.Parse("2e196d25-24d1-4db3-b732-9766c994a496");
 
@@ -335,8 +336,14 @@ namespace PlayGif
 
                 var html = game.Description;
 
-                // Always check for a cached rich description first (from any store fetch)
-                if (_steamService != null && _steamService.HasCachedDescription(game.Id))
+                // The cached rich description takes precedence, but only while the
+                // stored description still matches what it was cached from. Editing
+                // it in Playnite, or another metadata extension rewriting it, is a
+                // deliberate act — the cache stops applying until an explicit fetch,
+                // edit or reset refreshes it (issue #3).
+                var hasCache = _steamService != null && _steamService.HasCachedDescription(game.Id);
+
+                if (hasCache && _steamService.IsCachedDescriptionCurrent(game))
                 {
                     var cachedHtml = await _steamService.GetRichDescriptionAsync(game);
                     if (!string.IsNullOrEmpty(cachedHtml))
@@ -344,6 +351,13 @@ namespace PlayGif
                         html = cachedHtml;
                         Logger.Info($"Using cached rich description for: {game.Name} ({html.Length} chars)");
                     }
+                }
+                else if (hasCache)
+                {
+                    // Superseded. Not auto-refetched: the fetch would read the same
+                    // stale file back out of the cache, and re-downloading would
+                    // overwrite the description the user just chose.
+                    Logger.Info($"Stored description for {game.Name} changed since it was cached. Rendering it as-is.");
                 }
                 else
                 {
@@ -632,8 +646,7 @@ namespace PlayGif
 
                 if (updated != desc)
                 {
-                    game.Description = updated;
-                    _api.Database.Games.Update(game);
+                    UpdateStoredDescription(game, updated);
                 }
             }
 
@@ -856,7 +869,7 @@ namespace PlayGif
                 // Load whatever is actually being displayed: the cached rich
                 // description when one exists, otherwise Playnite's own text.
                 string html;
-                if (_steamService.HasCachedDescription(game.Id))
+                if (_steamService.IsCachedDescriptionCurrent(game))
                     html = await _steamService.GetRichDescriptionAsync(game) ?? "";
                 else
                     html = game.Description ?? "";
@@ -885,7 +898,7 @@ namespace PlayGif
                 // Saving always writes the cached copy, creating it when the game
                 // had none — otherwise editing a plain-metadata game would appear
                 // to do nothing, since the cache is what the renderer reads.
-                _steamService.SaveCachedDescription(game.Id, edited);
+                _steamService.SaveCachedDescription(game, edited);
                 Logger.Info($"Saved edited description for {game.Name} ({edited.Length} chars)");
 
                 // Re-render once the modal has fully closed and the main window has
@@ -1197,18 +1210,30 @@ namespace PlayGif
                 $"<source src=\"{url}\" type=\"{type}\"></video>";
         }
 
+        // PlayGif's own writes to game.Description must not supersede its own cache,
+        // so the baseline moves with them. A cache that was already superseded stays
+        // that way — this never resurrects one. Returns whether the cache is still
+        // the description being rendered.
+        private bool UpdateStoredDescription(Game game, string html)
+        {
+            var cacheWasCurrent = _steamService?.IsCachedDescriptionCurrent(game) == true;
+
+            game.Description = html;
+            _api.Database.Games.Update(game);
+
+            if (cacheWasCurrent) _steamService.SaveBaseline(game);
+            return cacheWasCurrent;
+        }
+
         private void InsertMediaTag(Game game, string tag, string position)
         {
             // Update the Playnite DB description
             var desc = game.Description ?? "";
-            if (position == "top")
-                game.Description = tag + "\n" + desc;
-            else
-                game.Description = desc + "\n" + tag;
-            _api.Database.Games.Update(game);
+            var updated = position == "top" ? tag + "\n" + desc : desc + "\n" + tag;
 
-            // Also update the cached rich description if one exists
-            if (_steamService?.HasCachedDescription(game.Id) == true)
+            // Also update the cached rich description, but only while it is the one
+            // being rendered — editing a superseded cache would hide the tag.
+            if (UpdateStoredDescription(game, updated))
             {
                 _steamService.UpdateCachedDescription(game.Id, tag, position);
             }
@@ -1580,6 +1605,7 @@ namespace PlayGif
 
                     string cachedHtml = "";
                     var hasCached = _steamService?.HasCachedDescription(game.Id) == true;
+                    var cacheIsCurrent = hasCached && _steamService.IsCachedDescriptionCurrent(game);
                     if (hasCached)
                     {
                         var task = _steamService.GetRichDescriptionAsync(game);
@@ -1621,7 +1647,12 @@ namespace PlayGif
                         $"Playnite Game ID: {game.Id}\n" +
                         $"Plugin: {(game.PluginId == Guid.Empty ? "Manual" : game.PluginId.ToString())}\n" +
                         $"Steam AppId: {appId}  |  GOG ID: {gogId}\n" +
-                        $"PlayGif cache: {(hasCached ? "YES" : "none")}\n" +
+                        $"PlayGif cache: {(hasCached ? "YES" : "none")}" +
+                        (hasCached
+                            ? cacheIsCurrent
+                                ? "  |  in use\n"
+                                : "  |  superseded (stored description changed since it was cached)\n"
+                            : "\n") +
                         $"Cache folder: {cacheDir}\n" +
                         $"Cached files:\n  {cacheFiles}\n\n" +
                         AnalyzeHtml(storedHtml, "Stored Description") + "\n" +

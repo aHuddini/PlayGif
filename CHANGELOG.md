@@ -2,6 +2,18 @@
 
 All notable changes to PlayGif will be documented in this file.
 
+## [1.0.4] - 2026-08-29
+
+### Fixed
+- **Custom and extension-written descriptions were replaced by the cached store description** ([#3](https://github.com/aHuddini/PlayGif/issues/3)). `TryInjectAndRender` used the cached rich description whenever the cache file existed, so `game.Description` was only ever a fallback. Editing the description in Playnite, or having another metadata extension rewrite it, changed nothing on screen — the underlying metadata was never touched, only the HTML handed to the renderer.
+  - The cache is now stamped with the `game.Description` it was derived from, written to `Games/<id>/_baseline.html` alongside it. The cache applies while the stored description still matches that stamp; once it differs, PlayGif renders the stored description as-is.
+  - Deliberately not auto-refetched when superseded. `GetRichDescriptionAsync` returns the cache before making a request, so the stale copy would come straight back, and re-downloading would overwrite the description the user just chose.
+  - An empty `game.Description` overrules nothing, so the cache still applies to it — auto-fetch behaviour for games with no description is unchanged.
+  - Explicit **Fetch description**, **Edit description** and **Reset description** re-stamp the baseline, putting the cache back in charge.
+  - PlayGif's own writes to `game.Description` (Add media, Remove media, Repair description links) move the baseline with them, via a single `UpdateStoredDescription` helper, so they do not supersede the cache. A cache that was already superseded stays that way — the helper never resurrects one.
+  - Caches written before this version have no baseline. The current stored description is adopted as one on first render rather than discarding a cache the user has been looking at, so those games behave as before until the description is next changed.
+- `scripts/check_description_baseline.ps1` exercises the above against the built assembly.
+
 ## [1.0.3] - 2026-08-15
 
 ### Added
