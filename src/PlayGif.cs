@@ -365,8 +365,11 @@ namespace PlayGif
                     var hasMedia = !string.IsNullOrEmpty(html) &&
                         (html.Contains("<video") || html.Contains(".webm") || html.Contains(".mp4"));
 
-                    // If no media, try to auto-fetch from Steam
-                    if (!hasMedia && _steamService != null)
+                    // If no media, try to auto-fetch from Steam. A non-empty description
+                    // may be the user's own or another extension's, so the setting can
+                    // keep it; an empty one always fetches (issue #3).
+                    var mayFetch = string.IsNullOrEmpty(html) || Settings.AutoFetchStoreDescriptions;
+                    if (!hasMedia && mayFetch && _steamService != null)
                     {
                         Logger.Info($"Description for {game.Name} has no media ({html?.Length ?? 0} chars). Fetching from Steam...");
                         var richHtml = await _steamService.GetRichDescriptionAsync(game);
