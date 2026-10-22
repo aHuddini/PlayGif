@@ -28,13 +28,28 @@ https://github.com/user-attachments/assets/90acd659-e195-446f-aeab-e5349ae84fd7
 
 ## What's New - v1.0.4
 
+Includes everything from 1.0.3, which was not released on its own.
+
+### New
+- **Edit description.** Right-click a game → PlayGif → Edit description opens a visual editor where your GIFs and videos play while you edit. Insert media at the cursor from web search, a URL or a file, click any media to resize or remove it, and format text with headings, quotes, colour, alignment and lists. There's a raw HTML view too.
+- **Keep your own descriptions.** Turn off *Replace descriptions that have no media with the store description* in Settings → General, and PlayGif leaves descriptions written by you or another extension (such as Metadata AI) alone. Games with no description are still filled in.
+- **Video previews in web search.** MP4 and WebM results play in the picker, so you can see the clip before adding it.
+
 ### Fixed
-- **Your own description now wins.** If you write or edit a game's description in Playnite, PlayGif shows it. Previously, once PlayGif had fetched a store description for a game, that copy was shown from then on and your edits appeared to do nothing — your text was always safe in Playnite, but you never saw it.
-- **PlayGif plays nicely with other metadata extensions.** If something else updates a description after PlayGif has fetched one — an AI description generator, for example — the new description is what you see.
-- Nothing changes for games you haven't touched: PlayGif still fetches rich store descriptions automatically, and **Fetch description**, **Edit description** and **Reset description** all put PlayGif back in charge of a game whose description you've since changed.
+- **Steam videos play for every game.** For some games (Cyberpunk 2077 and Valheim, for example) Steam's MP4 version is in a format the renderer can't play, so the video area stayed blank. PlayGif now spots these and switches to the other version Steam provides.
+- **Your own description now wins.** If you, or another extension, change a game's description after PlayGif fetched one, the new description is what you see. Fetch, Edit and Reset description put PlayGif back in charge.
+- **Fetching descriptions for many games at once no longer crashes Playnite.** It goes one game at a time with a progress bar you can cancel, and finishes with a single summary.
+- **Preview description** works for every game, including ones with a `:` in the name.
+- **Media added from web search no longer shows as an empty gap**, and Imgur `.gifv` links work.
+- **Playnite no longer stays dimmed** after closing a PlayGif dialog.
+- Quickly switching games no longer shows the previous game's description, links that open in a new tab go to your browser, and cancelling settings really discards your changes.
+
+### Improved
+- **Smoother scrolling.** Only the videos you can see play; the rest wait until you scroll to them.
+- **"Refresh description" is now "Reset description"**, and asks before discarding cached media and edits.
 
 ### Previous Version
-- **v1.0.3**: the **Edit description** visual editor, a fix for web-search media showing as an empty gap, working Imgur `.gifv` links, and no more dimmed Playnite window after closing a dialog.
+- **v1.0.2**: descriptions fetched in your language, **Convert cached media to MP4** and **Repair description links**, and a fix attempt for descriptions reverting to plain text after a restart.
 
 ---
 
@@ -55,7 +70,7 @@ https://github.com/user-attachments/assets/90acd659-e195-446f-aeab-e5349ae84fd7
 - **Playnite 10** (SDK 6.16.0)
 - **Windows 10 (2004 / May 2020 update) or newer**, or Windows 11
 - **WebView2 Evergreen Runtime** — pre-installed on Windows 11 and most Windows 10 machines. If missing, get it from [Microsoft](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)
-- **FFmpeg** *(optional)* — needed for **Convert cached media to MP4**, and used to convert the rare video a store publishes exclusively as WebM. Everything still plays without it.
+- **FFmpeg** *(optional)* — needed for **Convert cached media to MP4**, and used to convert the store videos PlayGif falls back to WebM for into MP4. Everything still plays without it.
 
 ---
 

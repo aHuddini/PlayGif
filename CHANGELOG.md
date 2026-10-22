@@ -2,9 +2,36 @@
 
 All notable changes to PlayGif will be documented in this file.
 
-## [1.0.4] - 2026-08-29
+## [1.0.4] - 2026-10-21
 
 ### Fixed
+- **Steam videos did not play for some games** ([#5](https://github.com/aHuddini/PlayGif/issues/5)). Steam pairs each VP9 WebM with an MP4, and for some games that MP4 is **HEVC** (`hvc1`) rather than H.264 — Cyberpunk 2077, Valheim, Dead by Daylight and Trine among them. `PickBestSource` always kept the MP4 and dropped the WebM. WebView2 fails HEVC with `PIPELINE_ERROR_DECODE` even with the Windows HEVC extension installed, so those videos showed a blank player. Measured in PlayGif's WebView2 environment: HEVC 0 frames decoded; VP9 and H.264 both decode with hardware acceleration (`mediaCapabilities.powerEfficient`).
+  - MP4 is still preferred. Once cached, its codec is read from the sample entry (`avc1` vs `hvc1`/`hev1`); HEVC loses to the WebM, which with FFmpeg is converted to H.264 like any other WebM.
+  - Before the MP4 is cached its codec is unknown, so both sources are kept, MP4 first. A source that loads but fails to decode is not a reason for the browser to try the next `<source>`, so `shell.html` switches on the video's `error` event. This also covers auto-cache being off.
+  - A cached WebM wins over an uncached MP4, so a reclaimed HEVC file is not downloaded again on the next render.
+  - `ReclaimStaleWebm` is now `ReclaimDroppedSources`: it removes whichever sibling lost (a WebM next to an H.264 MP4, or an HEVC MP4 next to its WebM) once the winner or its conversion is on disk.
+  - `scripts/check_source_pick.ps1` covers selection, the codec sniff and reclamation.
+- **"Preview description" failed with "The given path's format is not supported"** ([#6](https://github.com/aHuddini/PlayGif/issues/6)). The temp file was named from the raw game name, so names containing `:` or `?` produced an invalid path. The name now goes through `SanitizeFileName`.
+- **Fetch description on a large selection crashed Playnite.** `FetchStoreDescription` started every request at once without awaiting, and reported each result in its own `ShowMessage`. Steam rate-limited the burst and thousands of message boxes opened. It now runs sequentially behind one cancellable `ActivateGlobalProgress` and shows a single summary (names capped at 10). The per-game debug-mode popup was removed; **Preview description** carries the same detail.
+- **A slow store fetch could overwrite a newer selection.** `TryInjectAndRender` awaited the fetch and rendered regardless of what was selected by then. It now bails if the selection changed.
+- **Cancelling the settings dialog did not revert the running services.** `CancelEdit` replaced the `Settings` object, but `MediaCacheService` and `DescriptionRendererService` held the original instance until restart. Saved values are now populated into the existing instance, and the video scale is re-normalized.
+- **Links in descriptions.** `target="_blank"` links (Steam's link filter) opened an unrestricted WebView2 popup window; `NewWindowRequested` now opens them in the browser. Navigation that was not user-initiated no longer launches the browser, and `data:`/`about:` navigations are no longer allowed once the shell is loaded — following one replaced the shell page and broke every later render.
+- **Theme font size was ignored in comma-decimal locales.** `UpdateTheme` formatted the size with the current culture (`13,33px`). It is now invariant, and the font family is JSON-encoded rather than interpolated into a quoted string.
+- **Fullscreen injection blanked the theme's description area.** The ScrollViewer path replaced `ScrollViewer.Content` with the WebView. That unloaded the description element, so it immediately read as a torn-down view, and `Detach` set the content to `null` while `Restore` re-parented an element that still had a logical parent. All injection now goes through `FindHostPanel`: the WebView is inserted beside the description in its nearest non-items-host Panel inside the ScrollViewer, taking the Grid cell and dock of what it sits beside. Desktop injection is unchanged.
+- **Description editor could save an empty description.** If `getContent()` threw, `ExecuteScriptAsync` returned `"null"`, which became `""` and was saved. Save now refuses and reports the error.
+- **Media picker crashed on a malformed search result.** `new Uri(...)` threw in `SelectionChanged`. URLs are now parsed with `Uri.TryCreate`, and only GIFs are handed to XamlAnimatedGif (GIF-only).
+
+### Added
+- **"Replace descriptions that have no media with the store description"** setting (General, on by default) ([#3](https://github.com/aHuddini/PlayGif/issues/3)). The baseline below only covers games that already had a cache; a game with none still auto-fetched over a non-empty custom or Metadata AI description on first view. Turning this off limits auto-fetch to games whose description is empty. Explicit **Fetch description** is unaffected.
+- **Web search picker previews video results.** MP4, WebM and `.gifv` results play muted and looping in a `MediaElement`, over the search thumbnail, which stays visible if Windows cannot decode the file (WebM needs the VP9 extension, HEVC its own). Stills preview as their thumbnail.
+
+### Changed
+- **Description HTML is sanitized before rendering and editing.** `DescriptionRendererService.StripScripts` removes `script`, `object`, `embed`, `base` and `meta`, every `on*` attribute, and `javascript:`/`vbscript:` URLs (after entity decoding and whitespace removal, as the browser does). It runs on every render and on the editor's initial content, whose page can post messages back to the plugin. `scripts/check_strip_scripts.ps1` covers it.
+- **`shell.html` and `editor.html` carry a Content-Security-Policy** (`script-src 'nonce-playgif'; object-src 'none'; base-uri 'none'`). HtmlAgilityPack does not parse exactly as the browser does, so the sanitizer is a first pass; the policy is what refuses injected handlers, `javascript:` URLs and `srcdoc` script regardless of parsing. Verified in WebView2: four attacks that ran without the policy (`img onerror`, SVG `onbegin`, `javascript:` link, `srcdoc` script) all failed with it, while `ExecuteScriptAsync`, which the plugin drives both pages with, kept working. The editor toolbar moved from `onclick` attributes to one delegated listener scoped to the toolbar and media bar, since the policy refuses inline handlers too.
+
+### Performance
+- **Only videos near the visible area play.** The IntersectionObserver in `shell.html` never fired: the WebView is sized to the full description and Playnite's ScrollViewer scrolls it, so the page considered every video on screen and decoded all of them. `HwndClipper` already computes the visible slice for its window region; it now raises `VisibleRangeChanged`, relayed through `DescriptionViewMonitor` to `setViewport(top, bottom)`, and the page plays or pauses each video by its rect. `pauseAll` suspends playback so scrolling while a game runs or Playnite is in the background does not restart it.
+
 - **Custom and extension-written descriptions were replaced by the cached store description** ([#3](https://github.com/aHuddini/PlayGif/issues/3)). `TryInjectAndRender` used the cached rich description whenever the cache file existed, so `game.Description` was only ever a fallback. Editing the description in Playnite, or having another metadata extension rewrite it, changed nothing on screen — the underlying metadata was never touched, only the HTML handed to the renderer.
   - The cache is now stamped with the `game.Description` it was derived from, written to `Games/<id>/_baseline.html` alongside it. The cache applies while the stored description still matches that stamp; once it differs, PlayGif renders the stored description as-is.
   - Deliberately not auto-refetched when superseded. `GetRichDescriptionAsync` returns the cache before making a request, so the stale copy would come straight back, and re-downloading would overwrite the description the user just chose.
@@ -15,6 +42,8 @@ All notable changes to PlayGif will be documented in this file.
 - `scripts/check_description_baseline.ps1` exercises the above against the built assembly.
 
 ## [1.0.3] - 2026-08-15
+
+Not released on its own; these changes ship in 1.0.4.
 
 ### Added
 - **Edit description** (right-click → PlayGif). Opens the description in a `contenteditable` WebView2 surface that maps the same `playgif.local` virtual host as the renderer, so media plays while being edited.

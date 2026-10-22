@@ -2,24 +2,23 @@ AddonId: 'PlayGif.2e196d25-24d1-4db3-b732-9766c994a496'
 Packages:
   - Version: 1.0.4
     RequiredApiVersion: 6.16.0
-    ReleaseDate: 2026-08-29
+    ReleaseDate: 2026-10-21
     PackageUrl: 'https://github.com/aHuddini/PlayGif/releases/download/1.0.4/PlayGif-1_0_4.pext'
     Changelog:
-      - '[Critical Fix] Descriptions you write or edit in Playnite are now shown (issue #3). Once PlayGif had fetched a store description for a game, that copy was displayed from then on, so editing the description appeared to do nothing. Your text was never overwritten in Playnite - only what was drawn on screen.'
-      - '[Improved] PlayGif no longer overrides descriptions written by other metadata extensions. If something else updates a description after PlayGif fetched one, the newer description is what you see.'
-      - '[Improved] Fetch description, Edit description and Reset description put PlayGif back in charge of a game whose description has since been changed. Games with no description of their own still get a rich store description fetched automatically, as before.'
-  - Version: 1.0.3
-    RequiredApiVersion: 6.16.0
-    ReleaseDate: 2026-08-15
-    PackageUrl: 'https://github.com/aHuddini/PlayGif/releases/download/1.0.3/PlayGif-1_0_3.pext'
-    Changelog:
-      - '[New Feature] Edit description: opens the description in a visual editor where media plays while you edit. Insert images and video at the cursor from web search, a URL, or a file; format text with headings, quotes, colour, alignment and lists; click any media to resize or remove it. Includes a raw HTML view.'
-      - '[Critical Fix] Animated images added from web search showed as empty gaps. The file format is now read from the download itself rather than guessed from the address, so an animation served without a file extension is no longer saved as an unplayable video.'
-      - '[Fixed] Imgur .gifv links now work; they are pages rather than media, and are fetched as the MP4 they contain. A link that returns a web page is reported instead of being saved as broken media.'
-      - '[Fixed] Playnite no longer stays dimmed after closing a PlayGif dialog, which previously looked like a modal was still open until another dialog was opened and closed.'
-      - '[Improved] Web search results show the file format on each thumbnail, highlighted when the format is animated.'
-      - '[Improved] Renamed "Refresh description" to "Reset description", which is what it does - it discards the cached description and all cached media. It now confirms first and states what is lost.'
-      - '[Improved] Add media lists Search web images first, then From URL, then Local file.'
+      - '[Critical Fix] Steam videos play for every game (issue #5). Some games, such as Cyberpunk 2077 and Valheim, have Steam MP4s in a format (HEVC) the renderer cannot decode. PlayGif still prefers MP4, but detects these and uses the WebM instead.'
+      - '[Critical Fix] Descriptions you or another extension change in Playnite are shown instead of an older cached store copy (issue #3).'
+      - '[Critical Fix] Fetching descriptions for many games at once no longer crashes Playnite. It runs one game at a time with a cancellable progress bar and one summary.'
+      - '[Critical Fix] Media added from web search no longer shows as an empty gap; the format is read from the download, not guessed from the address.'
+      - '[New Feature] Edit description: a visual editor where media plays while you edit. Insert media at the cursor, resize or remove it, format text, or edit raw HTML.'
+      - '[New Feature] Setting to keep descriptions written by you or an extension such as Metadata AI, instead of replacing them with the store description (issue #3).'
+      - '[New Feature] Web search previews MP4 and WebM results before you add them.'
+      - '[Performance] Only videos on screen play, instead of every video in the description at once.'
+      - '[Fixed] Preview description works for games with characters such as ":" in their name (issue #6).'
+      - '[Fixed] Imgur .gifv links work, and Playnite no longer stays dimmed after closing a PlayGif dialog.'
+      - '[Fixed] Fullscreen mode no longer blanks the theme''s description area.'
+      - '[Fixed] Switching games quickly no longer shows the previous description; new-tab links open in your browser; cancelling settings discards changes; theme font size applies in every language; the editor cannot save an empty description by mistake.'
+      - '[Improved] Scripts embedded in description text are removed before display.'
+      - '[Improved] "Refresh description" is now "Reset description" and asks first; web search shows each result''s format; Add media lists web search first.'
   - Version: 1.0.2
     RequiredApiVersion: 6.16.0
     ReleaseDate: 2026-08-03
