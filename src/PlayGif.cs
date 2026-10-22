@@ -1257,79 +1257,71 @@ namespace PlayGif
                 _steamService = new SteamDescriptionService(basePath, () => _api.ApplicationSettings.Language);
             }
 
-            foreach (var game in games)
+            var storeName = store == "gog" ? "GOG" : "Steam";
+            var fetched = 0;
+            var unresolved = new List<string>();
+            var failed = new List<string>();
+
+            // One sequential pass behind a single progress dialog. Firing every
+            // request at once and reporting each result in its own dialog crashed
+            // Playnite on large selections: Steam rate-limits the burst and
+            // thousands of message boxes open at the same time.
+            _api.Dialogs.ActivateGlobalProgress((progressArgs) =>
             {
-                string storeId = null;
-                string storeName = store;
+                progressArgs.ProgressMaxValue = games.Count;
 
-                if (store == "steam")
+                for (int i = 0; i < games.Count; i++)
                 {
-                    storeId = _steamService.ResolveSteamAppId(game);
+                    if (progressArgs.CancelToken.IsCancellationRequested) break;
+
+                    var game = games[i];
+                    progressArgs.Text = $"Fetching {storeName} description: {game.Name} ({i + 1}/{games.Count})";
+
+                    var storeId = store == "gog"
+                        ? _steamService.ResolveGogProductId(game)
+                        : _steamService.ResolveSteamAppId(game);
+
                     if (string.IsNullOrEmpty(storeId))
                     {
-                        _api.Dialogs.ShowMessage(
-                            $"Could not resolve Steam AppId for: {game.Name}\n\n" +
-                            "Game must be from Steam library or have a Steam store link.",
-                            Constants.PluginName);
-                        continue;
+                        unresolved.Add(game.Name);
                     }
-                }
-                else if (store == "gog")
-                {
-                    storeId = _steamService.ResolveGogProductId(game);
-                    if (string.IsNullOrEmpty(storeId))
+                    else
                     {
-                        _api.Dialogs.ShowMessage(
-                            $"Could not resolve GOG product ID for: {game.Name}\n\n" +
-                            "Game must be from GOG library or have a GOG store link.",
-                            Constants.PluginName);
-                        continue;
+                        _steamService.ClearCachedDescription(game.Id);
+                        var html = (store == "gog"
+                            ? _steamService.FetchGogDescriptionAsync(game)
+                            : _steamService.GetRichDescriptionAsync(game)).GetAwaiter().GetResult();
+
+                        if (string.IsNullOrEmpty(html)) failed.Add($"{game.Name} (ID: {storeId})");
+                        else fetched++;
                     }
+
+                    progressArgs.CurrentProgressValue = i + 1;
                 }
+            }, new GlobalProgressOptions($"Fetching {storeName} descriptions...", true)
+            {
+                IsIndeterminate = false
+            });
 
-                _steamService.ClearCachedDescription(game.Id);
+            // A single successful fetch speaks for itself on screen
+            if (unresolved.Count > 0 || failed.Count > 0 || games.Count > 1)
+            {
+                string Names(List<string> names) =>
+                    "\n  " + string.Join("\n  ", names.Take(10)) +
+                    (names.Count > 10 ? $"\n  ...and {names.Count - 10} more" : "");
 
-                System.Threading.Tasks.Task<string> task;
-                if (store == "gog")
-                    task = _steamService.FetchGogDescriptionAsync(game);
-                else
-                    task = _steamService.GetRichDescriptionAsync(game);
-
-                var capturedGame = game;
-                var capturedId = storeId;
-                task.ContinueWith(t =>
-                {
-                    Application.Current.Dispatcher.BeginInvoke(new Action(() =>
-                    {
-                        var html = t.Result;
-                        if (string.IsNullOrEmpty(html))
-                        {
-                            _api.Dialogs.ShowMessage(
-                                $"Failed to fetch from {storeName} for: {capturedGame.Name} (ID: {capturedId})",
-                                Constants.PluginName);
-                            return;
-                        }
-
-                        if (Settings.EnableDebugMode)
-                        {
-                            var videoCount = System.Text.RegularExpressions.Regex.Matches(html, "<video").Count;
-                            var imgCount = System.Text.RegularExpressions.Regex.Matches(html, "<img").Count;
-                            _api.Dialogs.ShowMessage(
-                                $"Fetched from {storeName} for: {capturedGame.Name}\n" +
-                                $"Store ID: {capturedId}\n" +
-                                $"Size: {html.Length} chars\n" +
-                                $"Videos: {videoCount}  |  Images: {imgCount}",
-                                Constants.PluginName);
-                        }
-
-                        if (_lastSelectedGame?.Id == capturedGame.Id)
-                        {
-                            _lastSelectedGame = capturedGame;
-                            TryInjectAndRender(capturedGame);
-                        }
-                    }));
-                });
+                _api.Dialogs.ShowMessage(
+                    $"Fetched {fetched} of {games.Count} description(s) from {storeName}." +
+                    (unresolved.Count > 0
+                        ? $"\n\nNo {storeName} ID — the game must be from the {storeName} library " +
+                          $"or have a {storeName} store link:" + Names(unresolved)
+                        : "") +
+                    (failed.Count > 0 ? $"\n\nFailed to fetch:" + Names(failed) : ""),
+                    Constants.PluginName);
             }
+
+            if (_lastSelectedGame != null && games.Any(g => g.Id == _lastSelectedGame.Id))
+                TryInjectAndRender(_lastSelectedGame);
         }
 
         private void UpdateThemeColors()
