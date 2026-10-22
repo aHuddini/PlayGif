@@ -136,6 +136,8 @@ namespace PlayGif
                         }));
                 };
 
+                _viewMonitor.VisibleRangeChanged += (top, bottom) => _renderer.SetViewport(top, bottom);
+
                 _viewMonitor.StartMonitoring();
 
                 // Subscribe to window events

@@ -307,6 +307,14 @@ namespace PlayGif.Services
                 $"setTheme('{textHex}', '{linkHex}', '{fontSize}px', '{fontFamily}', 'transparent')");
         }
 
+        public void SetViewport(double top, double bottom)
+        {
+            if (!_shellReady) return;
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            _ = _webView.CoreWebView2.ExecuteScriptAsync(
+                $"setViewport({top.ToString(inv)}, {bottom.ToString(inv)})");
+        }
+
         public void PauseAll()
         {
             if (!_isInitialized) return;

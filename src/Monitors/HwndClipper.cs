@@ -27,6 +27,11 @@ namespace PlayGif.Monitors
         // Last region actually handed to SetWindowRgn, in HWND-local device pixels
         private Rect? _lastRegion;
 
+        // The WebView is sized to the whole description, so the page itself thinks
+        // everything is on screen. This reports the slice that really is, top to
+        // bottom in WebView DIPs (equal to CSS px), whenever the clip changes.
+        public event Action<double, double> VisibleRangeChanged;
+
         public HwndClipper(WebView2 webView, ScrollViewer scrollViewer)
         {
             _webView = webView;
@@ -123,6 +128,7 @@ namespace PlayGif.Monitors
 
                     var emptyRgn = CreateRectRgn(0, 0, 0, 0);
                     SetWindowRgn(webViewHwnd, emptyRgn, true);
+                    VisibleRangeChanged?.Invoke(0, 0);
                 }
                 else
                 {
@@ -148,6 +154,7 @@ namespace PlayGif.Monitors
                         (int)(region.X + region.Width),
                         (int)(region.Y + region.Height));
                     SetWindowRgn(webViewHwnd, rgn, false);
+                    VisibleRangeChanged?.Invoke(localRect.Top, localRect.Bottom);
                 }
             }
             catch { }

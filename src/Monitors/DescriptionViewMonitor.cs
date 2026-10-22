@@ -55,6 +55,12 @@ namespace PlayGif.Monitors
         // the element often does not exist yet and there is nothing to inject into.
         public event Action DescriptionAppeared;
 
+        // The slice of the WebView actually on screen, top to bottom in its own DIPs
+        public event Action<double, double> VisibleRangeChanged;
+
+        private void OnVisibleRangeChanged(double top, double bottom) =>
+            VisibleRangeChanged?.Invoke(top, bottom);
+
         public void StartMonitoring()
         {
             if (_isHooked) return;
@@ -192,12 +198,7 @@ namespace PlayGif.Monitors
             _clipper?.Detach();
             _clipper = null;
 
-            if (webView != null)
-            {
-                if (webView.Parent is Panel p) p.Children.Remove(webView);
-                else if (webView.Parent is ContentControl cc && ReferenceEquals(cc.Content, webView)) cc.Content = null;
-                else if (_injectionTarget is ScrollViewer sv && ReferenceEquals(sv.Content, webView)) sv.Content = null;
-            }
+            if (webView?.Parent is Panel p) p.Children.Remove(webView);
 
             // Restore the theme's own description element in the old view
             if (_hiddenHtmlTextView != null)
@@ -252,64 +253,65 @@ namespace PlayGif.Monitors
 
             Logger.Info($"Found description element. Parent type: {parent.GetType().Name}");
 
-            // Desktop mode: parent is a Panel (StackPanel PART_ElemDescription)
+            // The WebView goes beside the description in its nearest Panel. Desktop
+            // themes parent it in a Panel directly (PART_ElemDescription); fullscreen
+            // themes usually wrap it first. Content is never replaced: taking the
+            // description out of the tree unloads it, which reads as a torn-down view,
+            // and detaching then left the theme's area blank.
             // WebView2 is full content height (set by JS reportHeight)
             // No internal scrolling — parent ScrollViewer scrolls, SetWindowRgn clips
-            if (parent is Panel panel)
+            var (panel, child) = FindHostPanel(htmlTextView);
+            if (panel == null)
             {
-                htmlTextView.Visibility = Visibility.Collapsed;
-                _hiddenHtmlTextView = htmlTextView;
-                _injectionTarget = panel;
-                _parentScrollViewer = FindAncestor<ScrollViewer>(panel);
-
-                webView.HorizontalAlignment = HorizontalAlignment.Stretch;
-
-                int index = panel.Children.IndexOf(htmlTextView);
-                if (index < 0) index = panel.Children.Count;
-                panel.Children.Insert(index + 1, webView);
-
-                // Clip the HWND to prevent airspace overflow
-                if (_parentScrollViewer != null)
-                {
-                    _clipper = new HwndClipper(webView, _parentScrollViewer);
-                    _clipper.Attach();
-                }
-
-                Logger.Info("Injected into Panel (desktop mode) with HWND clipping.");
+                Logger.Info($"Could not inject — no Panel around the description (parent: {parent.GetType().Name})");
                 return;
             }
 
-            // Fullscreen / other: find the nearest ScrollViewer ancestor
-            _parentScrollViewer = FindAncestor<ScrollViewer>(htmlTextView);
+            htmlTextView.Visibility = Visibility.Collapsed;
+            _hiddenHtmlTextView = htmlTextView;
+            _injectionTarget = panel;
+            _parentScrollViewer = FindAncestor<ScrollViewer>(panel);
+
+            webView.HorizontalAlignment = HorizontalAlignment.Stretch;
+
+            // Same cell as what it sits beside, otherwise a Grid drops it in row 0
+            Grid.SetRow(webView, Grid.GetRow(child));
+            Grid.SetColumn(webView, Grid.GetColumn(child));
+            Grid.SetRowSpan(webView, Grid.GetRowSpan(child));
+            Grid.SetColumnSpan(webView, Grid.GetColumnSpan(child));
+            DockPanel.SetDock(webView, DockPanel.GetDock(child));
+
+            panel.Children.Insert(panel.Children.IndexOf(child) + 1, webView);
+
+            // Clip the HWND to prevent airspace overflow
             if (_parentScrollViewer != null)
             {
-                htmlTextView.Visibility = Visibility.Collapsed;
-                _hiddenHtmlTextView = htmlTextView;
-                _injectionTarget = _parentScrollViewer;
-
-                webView.HorizontalAlignment = HorizontalAlignment.Stretch;
-                _parentScrollViewer.Content = webView;
-
                 _clipper = new HwndClipper(webView, _parentScrollViewer);
+                _clipper.VisibleRangeChanged += OnVisibleRangeChanged;
                 _clipper.Attach();
-
-                Logger.Info($"Injected into ScrollViewer ({_parentScrollViewer.GetType().Name}) with HWND clipping.");
-                return;
             }
 
-            // Last resort
-            var ancestorPanel = FindAncestor<Panel>(htmlTextView);
-            if (ancestorPanel != null)
+            Logger.Info($"Injected into {panel.GetType().Name}" +
+                (ReferenceEquals(child, htmlTextView) ? "" : $" beside {child.GetType().Name}") +
+                (_clipper != null ? " with HWND clipping." : " (no ScrollViewer, unclipped)."));
+        }
+
+        // Nearest Panel ancestor the WebView can be added to, and which of its
+        // children holds the description. Stops at a ScrollViewer: a Panel beyond
+        // it is outside the scrolled area. An ItemsControl's panel refuses
+        // direct children, so it is skipped.
+        private static (Panel panel, UIElement child) FindHostPanel(FrameworkElement element)
+        {
+            DependencyObject child = element;
+            var cur = VisualTreeHelper.GetParent(element);
+            while (cur != null && !(cur is ScrollViewer))
             {
-                htmlTextView.Visibility = Visibility.Collapsed;
-                _hiddenHtmlTextView = htmlTextView;
-                _injectionTarget = ancestorPanel;
-                ancestorPanel.Children.Add(webView);
-                Logger.Info($"Injected via ancestor Panel: {ancestorPanel.GetType().Name}");
-                return;
+                if (cur is Panel p && !p.IsItemsHost && child is UIElement ui && p.Children.Contains(ui))
+                    return (p, ui);
+                child = cur;
+                cur = VisualTreeHelper.GetParent(cur);
             }
-
-            Logger.Info($"Could not inject — unsupported parent type: {parent.GetType().Name}");
+            return (null, null);
         }
 
         public void Restore()
@@ -318,16 +320,8 @@ namespace PlayGif.Monitors
             _clipper = null;
 
 
-            var webView = _webViewProvider();
-
-            if (webView?.Parent is Panel parentPanel)
-            {
-                parentPanel.Children.Remove(webView);
-            }
-            else if (_injectionTarget is ScrollViewer sv)
-            {
-                sv.Content = _hiddenHtmlTextView;
-            }
+            if (_webViewProvider()?.Parent is Panel parentPanel)
+                parentPanel.Children.Remove(_webViewProvider());
 
             if (_hiddenHtmlTextView != null)
             {
