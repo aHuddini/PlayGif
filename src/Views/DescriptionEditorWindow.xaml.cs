@@ -82,18 +82,19 @@ namespace PlayGif.Views
                 core.SetVirtualHostNameToFolderMapping(
                     Constants.VirtualHostName, mediaPath, CoreWebView2HostResourceAccessKind.Allow);
 
-                // Editing should never navigate away
+                // Editing should never navigate away, nor open popup windows
                 core.NavigationStarting += (s2, e2) =>
                 {
-                    if (!e2.Uri.StartsWith("about:") && !e2.Uri.StartsWith("data:") && _ready)
-                        e2.Cancel = true;
+                    if (_ready) e2.Cancel = true;
                 };
+                core.NewWindowRequested += (s2, e2) => e2.Handled = true;
 
                 core.NavigationCompleted += async (s2, e2) =>
                 {
                     if (_ready) return;
                     _ready = true;
-                    var escaped = JsonConvert.SerializeObject(_initialHtml);
+                    var escaped = JsonConvert.SerializeObject(
+                        Services.DescriptionRendererService.StripScripts(_initialHtml));
                     await core.ExecuteScriptAsync($"setContent({escaped})");
                 };
 

@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using System.Windows;
@@ -136,6 +137,7 @@ namespace PlayGif.Services
                 Constants.VirtualHostName, cachePath, CoreWebView2HostResourceAccessKind.Allow);
 
             core.NavigationStarting += OnNavigationStarting;
+            core.NewWindowRequested += OnNewWindowRequested;
             core.WebMessageReceived += OnWebMessageReceived;
             core.NavigationCompleted += OnShellNavigationCompleted;
 
@@ -177,18 +179,29 @@ namespace PlayGif.Services
 
         private void OnNavigationStarting(object sender, CoreWebView2NavigationStartingEventArgs e)
         {
-            // Allow the initial shell page load
+            // Allow the initial shell page load. Nothing navigates after that:
+            // a data: or about: link would replace the shell and every later
+            // render would silently fail.
             if (!_shellReady) return;
 
-            if (e.Uri.StartsWith("about:") || e.Uri.StartsWith("data:"))
-                return;
-
             e.Cancel = true;
-            if (e.Uri.StartsWith("http"))
-            {
-                try { System.Diagnostics.Process.Start(e.Uri); }
-                catch { }
-            }
+            // Only a click opens the browser — script in a description must not
+            if (e.IsUserInitiated) OpenInBrowser(e.Uri);
+        }
+
+        // target="_blank" links (Steam's link filter uses them) would otherwise
+        // open an unrestricted WebView2 popup instead of the user's browser
+        private void OnNewWindowRequested(object sender, CoreWebView2NewWindowRequestedEventArgs e)
+        {
+            e.Handled = true;
+            if (e.IsUserInitiated) OpenInBrowser(e.Uri);
+        }
+
+        private static void OpenInBrowser(string uri)
+        {
+            if (!uri.StartsWith("http")) return;
+            try { System.Diagnostics.Process.Start(uri)?.Dispose(); }
+            catch { }
         }
 
         public event Action<double> HeightReported;
@@ -238,9 +251,51 @@ namespace PlayGif.Services
                 return;
             }
 
-            var escaped = JsonConvert.SerializeObject(html);
+            var escaped = JsonConvert.SerializeObject(StripScripts(html));
             await _webView.CoreWebView2.ExecuteScriptAsync($"setContent({escaped})");
             _webView.Visibility = Visibility.Visible;
+        }
+
+        // Descriptions come from stores, other extensions and the web, and are set
+        // through innerHTML, which still runs inline handlers and javascript: URLs.
+        // Shared with the editor, whose page can post messages back to the plugin.
+        public static string StripScripts(string html)
+        {
+            if (string.IsNullOrEmpty(html)) return html;
+            try
+            {
+                var doc = new HtmlAgilityPack.HtmlDocument();
+                doc.LoadHtml(html);
+
+                foreach (var node in doc.DocumentNode.Descendants().ToList())
+                {
+                    if (node.Name == "script" || node.Name == "object" || node.Name == "embed" ||
+                        node.Name == "base" || node.Name == "meta")
+                    {
+                        node.Remove();
+                        continue;
+                    }
+
+                    foreach (var attr in node.Attributes.ToList())
+                    {
+                        // The browser decodes entities, then ignores whitespace and
+                        // control characters in a URL scheme ("java&#9;script:")
+                        var value = new string(HtmlAgilityPack.HtmlEntity.DeEntitize(attr.Value)
+                            .Where(c => c > ' ').ToArray());
+                        if (attr.Name.StartsWith("on", StringComparison.OrdinalIgnoreCase) ||
+                            value.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase) ||
+                            value.StartsWith("vbscript:", StringComparison.OrdinalIgnoreCase))
+                            attr.Remove();
+                    }
+                }
+
+                return doc.DocumentNode.OuterHtml;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Could not sanitize description HTML");
+                return "";
+            }
         }
 
         public void UpdateTheme(Color textColor, Color linkColor, double fontSize, string fontFamily)
