@@ -14,6 +14,13 @@ namespace PlayGif
             set { enableAnimatedDescriptions = value; OnPropertyChanged(nameof(EnableAnimatedDescriptions)); }
         }
 
+        private bool autoFetchStoreDescriptions = true;
+        public bool AutoFetchStoreDescriptions
+        {
+            get => autoFetchStoreDescriptions;
+            set { autoFetchStoreDescriptions = value; OnPropertyChanged(nameof(AutoFetchStoreDescriptions)); }
+        }
+
         private bool autoCacheMedia = true;
         public bool AutoCacheMedia
         {

@@ -15,6 +15,7 @@ namespace PlayGif.Common
 
         public const string VirtualHostName = "playgif.local";
         public const string ShellPageResource = "PlayGif.Resources.shell.html";
+        public const string EditorPageResource = "PlayGif.Resources.editor.html";
 
         #endregion
 

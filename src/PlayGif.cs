@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -40,7 +41,8 @@ namespace PlayGif
                 (game) =>
                 {
                     if (_lastSelectedGame?.Id == game.Id) TryInjectAndRender(game);
-                }));
+                },
+                (game, html) => UpdateStoredDescription(game, html)));
 
         public override Guid Id { get; } = Guid.Parse("2e196d25-24d1-4db3-b732-9766c994a496");
 
@@ -71,6 +73,20 @@ namespace PlayGif
             {
                 var basePath = GetPluginUserDataPath();
                 Logger.Info($"Plugin data path: {basePath}");
+
+                // Earlier builds gave the editor its own WebView2 profile, which
+                // conflicted with the renderer's GPU settings. It shares the
+                // renderer's environment now, so the old profile is dead weight.
+                try
+                {
+                    var stale = System.IO.Path.Combine(basePath, "EditorWebView2");
+                    if (System.IO.Directory.Exists(stale))
+                    {
+                        System.IO.Directory.Delete(stale, true);
+                        Logger.Info("Removed the obsolete editor WebView2 profile.");
+                    }
+                }
+                catch (Exception ex) { Logger.Error(ex, "Could not remove the old editor profile"); }
 
                 _cacheService = new MediaCacheService(Settings, basePath);
                 _steamService = new SteamDescriptionService(basePath, () => _api.ApplicationSettings.Language);
@@ -119,6 +135,8 @@ namespace PlayGif
                             TryInjectAndRender(_lastSelectedGame);
                         }));
                 };
+
+                _viewMonitor.VisibleRangeChanged += (top, bottom) => _renderer.SetViewport(top, bottom);
 
                 _viewMonitor.StartMonitoring();
 
@@ -320,8 +338,14 @@ namespace PlayGif
 
                 var html = game.Description;
 
-                // Always check for a cached rich description first (from any store fetch)
-                if (_steamService != null && _steamService.HasCachedDescription(game.Id))
+                // The cached rich description takes precedence, but only while the
+                // stored description still matches what it was cached from. Editing
+                // it in Playnite, or another metadata extension rewriting it, is a
+                // deliberate act — the cache stops applying until an explicit fetch,
+                // edit or reset refreshes it (issue #3).
+                var hasCache = _steamService != null && _steamService.HasCachedDescription(game.Id);
+
+                if (hasCache && _steamService.IsCachedDescriptionCurrent(game))
                 {
                     var cachedHtml = await _steamService.GetRichDescriptionAsync(game);
                     if (!string.IsNullOrEmpty(cachedHtml))
@@ -330,14 +354,24 @@ namespace PlayGif
                         Logger.Info($"Using cached rich description for: {game.Name} ({html.Length} chars)");
                     }
                 }
+                else if (hasCache)
+                {
+                    // Superseded. Not auto-refetched: the fetch would read the same
+                    // stale file back out of the cache, and re-downloading would
+                    // overwrite the description the user just chose.
+                    Logger.Info($"Stored description for {game.Name} changed since it was cached. Rendering it as-is.");
+                }
                 else
                 {
                     // No cache — check if stored description has media
                     var hasMedia = !string.IsNullOrEmpty(html) &&
                         (html.Contains("<video") || html.Contains(".webm") || html.Contains(".mp4"));
 
-                    // If no media, try to auto-fetch from Steam
-                    if (!hasMedia && _steamService != null)
+                    // If no media, try to auto-fetch from Steam. A non-empty description
+                    // may be the user's own or another extension's, so the setting can
+                    // keep it; an empty one always fetches (issue #3).
+                    var mayFetch = string.IsNullOrEmpty(html) || Settings.AutoFetchStoreDescriptions;
+                    if (!hasMedia && mayFetch && _steamService != null)
                     {
                         Logger.Info($"Description for {game.Name} has no media ({html?.Length ?? 0} chars). Fetching from Steam...");
                         var richHtml = await _steamService.GetRichDescriptionAsync(game);
@@ -352,6 +386,10 @@ namespace PlayGif
                         }
                     }
                 }
+
+                // A store fetch above can outlast a newer selection; rendering now
+                // would replace that game's description with this one
+                if (_lastSelectedGame != null && _lastSelectedGame.Id != game.Id) return;
 
                 if (string.IsNullOrEmpty(html))
                 {
@@ -617,8 +655,7 @@ namespace PlayGif
 
                 if (updated != desc)
                 {
-                    game.Description = updated;
-                    _api.Database.Games.Update(game);
+                    UpdateStoredDescription(game, updated);
                 }
             }
 
@@ -753,6 +790,147 @@ namespace PlayGif
             }
         }
 
+        // Themes dim the main window whenever it owns a child window, through a
+        // HasChildWindow trigger that sets Opacity to 0.4. Playnite only
+        // re-evaluates that property when it explicitly notifies, so a window we
+        // open and close on our own leaves the UI dimmed until some other dialog
+        // happens to refresh it — which is why opening Playnite's settings and
+        // closing it restored the display.
+        private void RefreshOwnerChildState()
+        {
+            Application.Current?.Dispatcher.BeginInvoke(
+                DispatcherPriority.Background,
+                new Action(() =>
+                {
+                    try
+                    {
+                        // Ask Playnite to re-read OwnedWindows on every window
+                        var t = Type.GetType("Playnite.Windows.WindowManager, Playnite");
+                        var m = t?.GetMethod("NotifyChildOwnershipChanges",
+                            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                        if (m != null)
+                        {
+                            m.Invoke(null, null);
+                            return;
+                        }
+
+                        // Fallback: raise the property change ourselves so the
+                        // theme's binding re-reads it
+                        foreach (Window w in Application.Current.Windows)
+                        {
+                            var raise = w.GetType().GetMethod("OnPropertyChanged",
+                                System.Reflection.BindingFlags.Public |
+                                System.Reflection.BindingFlags.NonPublic |
+                                System.Reflection.BindingFlags.Instance,
+                                null, new[] { typeof(string) }, null);
+                            raise?.Invoke(w, new object[] { "HasChildWindow" });
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error(ex, "Could not refresh the child-window state");
+                    }
+                }));
+        }
+
+        // Backs the editor's Insert menu. Reuses the same paths as the right-click
+        // menu, so format detection, caching and virtual-host URLs all behave
+        // identically — only the insertion point differs.
+        private async Task<string> ProvideMediaTagAsync(Game game, string source)
+        {
+            switch (source)
+            {
+                case "search":
+                    var picked = PickWebImageUrl(game);
+                    return string.IsNullOrEmpty(picked)
+                        ? null : await DownloadMediaTagAsync(game, picked);
+
+                case "url":
+                    var input = _api.Dialogs.SelectString(
+                        "Enter media URL (GIF, MP4, image):", Constants.PluginName, "");
+                    if (input == null || !input.Result ||
+                        string.IsNullOrWhiteSpace(input.SelectedString)) return null;
+                    return await DownloadMediaTagAsync(game, input.SelectedString.Trim());
+
+                case "file":
+                    var path = _api.Dialogs.SelectFile(
+                        "Media files|*.gif;*.mp4;*.webp;*.apng;*.avif;*.png;*.jpg|All files|*.*");
+                    return string.IsNullOrEmpty(path) ? null : CopyAndBuildMediaTag(game, path);
+
+                default:
+                    return null;
+            }
+        }
+
+        // Opens the description in a WYSIWYG editor. Edits are written to PlayGif's
+        // cached description, which is what the renderer displays.
+        private async void EditDescription(Game game)
+        {
+            try
+            {
+                if (_steamService == null)
+                {
+                    var basePath = GetPluginUserDataPath();
+                    _steamService = new SteamDescriptionService(
+                        basePath, () => _api.ApplicationSettings.Language);
+                }
+
+                // Load whatever is actually being displayed: the cached rich
+                // description when one exists, otherwise Playnite's own text.
+                string html;
+                if (_steamService.IsCachedDescriptionCurrent(game))
+                    html = await _steamService.GetRichDescriptionAsync(game) ?? "";
+                else
+                    html = game.Description ?? "";
+
+                var window = new Views.DescriptionEditorWindow(
+                    html, game.Id, GetPluginUserDataPath(), game.Name,
+                    (source) => ProvideMediaTagAsync(game, source),
+                    _renderer?.Environment)
+                {
+                    Owner = Application.Current.MainWindow
+                };
+
+                var accepted = window.ShowDialog() == true;
+
+                // Themes dim the main window while it has an owned child, via a
+                // HasChildWindow trigger (Opacity 0.4). That property is only
+                // re-evaluated when Playnite is told to, so closing our window
+                // left the whole UI dimmed until some other dialog happened to
+                // refresh it. Nudge the binding so it re-reads OwnedWindows.
+                RefreshOwnerChildState();
+
+                if (!accepted) return;
+
+                var edited = window.ResultHtml ?? "";
+
+                // Saving always writes the cached copy, creating it when the game
+                // had none — otherwise editing a plain-metadata game would appear
+                // to do nothing, since the cache is what the renderer reads.
+                _steamService.SaveCachedDescription(game, edited);
+                Logger.Info($"Saved edited description for {game.Name} ({edited.Length} chars)");
+
+                // Re-render once the modal has fully closed and the main window has
+                // laid out again; doing it inline re-clips against stale geometry.
+                if (_lastSelectedGame?.Id == game.Id)
+                {
+                    Application.Current.Dispatcher.BeginInvoke(
+                        DispatcherPriority.ApplicationIdle,
+                        new Action(() =>
+                        {
+                            _viewMonitor?.RefreshClip();
+                            TryInjectAndRender(game);
+                        }));
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, $"Failed to edit description for {game.Name}");
+                _api.Dialogs.ShowMessage(
+                    $"Could not edit the description: {ex.Message}", Constants.PluginName);
+            }
+        }
+
         // Standalone repair for users who converted before this existed, or whose
         // descriptions reference media that is no longer on disk.
         public void RunDescriptionRepair()
@@ -866,42 +1044,62 @@ namespace PlayGif
 
         private async void DownloadAndInsertMedia(Game game, string url, string position)
         {
+            var tag = await DownloadMediaTagAsync(game, url);
+            if (tag == null) return;
+
+            Application.Current.Dispatcher.Invoke(() => InsertMediaTag(game, tag, position));
+        }
+
+        // Downloads into the game's cache and returns the tag, without inserting.
+        // The editor needs the tag to place at the cursor rather than at the top
+        // or bottom, so both callers share this. Returns null on failure, having
+        // already reported it.
+        private async Task<string> DownloadMediaTagAsync(Game game, string url)
+        {
             try
             {
                 var uri = new Uri(url);
-                var fileName = SanitizeFileName(System.IO.Path.GetFileName(uri.AbsolutePath));
-                if (string.IsNullOrEmpty(fileName) || !fileName.Contains("."))
-                    fileName = "media" + (url.Contains(".webm") ? ".webm" : url.Contains(".gif") ? ".gif" : ".mp4");
+                var baseName = SanitizeFileName(System.IO.Path.GetFileName(uri.AbsolutePath));
+                if (string.IsNullOrEmpty(baseName)) baseName = "media";
 
                 var gameDir = System.IO.Path.Combine(
                     GetPluginUserDataPath(), Common.Constants.GamesCacheFolder, game.Id.ToString());
                 System.IO.Directory.CreateDirectory(gameDir);
-                var destPath = System.IO.Path.Combine(gameDir, fileName);
 
-                await MediaCacheService.DownloadToFileAsync(url, destPath);
+                // The real format comes from the response, not the URL. Image hosts
+                // routinely serve a GIF from a path with no extension; guessing gave
+                // .mp4 and wrapped it in a <video> that could not decode, which is
+                // why added media showed as an empty gap.
+                var fileName = await MediaCacheService.DownloadAndDetectAsync(url, gameDir, baseName);
 
                 var localUrl = $"https://{Common.Constants.VirtualHostName}/{game.Id}/{fileName}";
                 var ext = System.IO.Path.GetExtension(fileName).ToLowerInvariant();
-                var tag = BuildMediaTag(localUrl, ext);
-
-                Application.Current.Dispatcher.Invoke(() =>
-                    InsertMediaTag(game, tag, position));
+                return BuildMediaTag(localUrl, ext);
             }
             catch (Exception ex)
             {
                 Logger.Error(ex, $"Failed to download media from: {url}");
                 Application.Current.Dispatcher.Invoke(() =>
                     _api.Dialogs.ShowMessage($"Failed to download: {ex.Message}", Constants.PluginName));
+                return null;
             }
         }
 
 
         private void SearchWebImages(Game game, string position)
         {
+            var url = PickWebImageUrl(game);
+            if (!string.IsNullOrEmpty(url)) DownloadAndInsertMedia(game, url, position);
+        }
+
+        // Runs the search and picker, returning the chosen URL without downloading.
+        // Shared with the editor, which needs to insert at the cursor instead.
+        private string PickWebImageUrl(Game game)
+        {
             var input = _api.Dialogs.SelectString(
                 "Search for images/GIFs:", Constants.PluginName, $"{game.Name} gif");
             if (input == null || !input.Result || string.IsNullOrWhiteSpace(input.SelectedString))
-                return;
+                return null;
 
             var searchTerm = input.SelectedString.Trim();
             var imageOptions = new System.Collections.Generic.List<ImageFileOption>();
@@ -965,13 +1163,13 @@ namespace PlayGif
             {
                 Logger.Error(ex, "Web image search failed");
                 _api.Dialogs.ShowMessage($"Search failed: {ex.Message}", Constants.PluginName);
-                return;
+                return null;
             }
 
             if (imageOptions.Count == 0)
             {
                 _api.Dialogs.ShowMessage("No images found.", Constants.PluginName);
-                return;
+                return null;
             }
 
             var mediaItems = imageOptions.Select(o => new Views.MediaItem
@@ -984,8 +1182,17 @@ namespace PlayGif
             var picker = new Views.MediaPickerWindow(mediaItems);
             picker.Title = $"Pick media for {game.Name} ({mediaItems.Count} results)";
 
-            if (picker.ShowDialog() == true && !string.IsNullOrEmpty(picker.SelectedUrl))
-                DownloadAndInsertMedia(game, picker.SelectedUrl, position);
+            // Owned so it stays above Playnite and is dimmed consistently; the
+            // refresh afterwards clears that dimming, which otherwise sticks.
+            var owner = Application.Current?.Windows.OfType<Window>()
+                .FirstOrDefault(w => w.IsActive) ?? Application.Current?.MainWindow;
+            if (owner != null && !ReferenceEquals(owner, picker)) picker.Owner = owner;
+
+            var chosen = picker.ShowDialog() == true && !string.IsNullOrEmpty(picker.SelectedUrl)
+                ? picker.SelectedUrl : null;
+
+            RefreshOwnerChildState();
+            return chosen;
         }
 
         private static string SanitizeFileName(string name)
@@ -1012,18 +1219,30 @@ namespace PlayGif
                 $"<source src=\"{url}\" type=\"{type}\"></video>";
         }
 
+        // PlayGif's own writes to game.Description must not supersede its own cache,
+        // so the baseline moves with them. A cache that was already superseded stays
+        // that way — this never resurrects one. Returns whether the cache is still
+        // the description being rendered.
+        private bool UpdateStoredDescription(Game game, string html)
+        {
+            var cacheWasCurrent = _steamService?.IsCachedDescriptionCurrent(game) == true;
+
+            game.Description = html;
+            _api.Database.Games.Update(game);
+
+            if (cacheWasCurrent) _steamService.SaveBaseline(game);
+            return cacheWasCurrent;
+        }
+
         private void InsertMediaTag(Game game, string tag, string position)
         {
             // Update the Playnite DB description
             var desc = game.Description ?? "";
-            if (position == "top")
-                game.Description = tag + "\n" + desc;
-            else
-                game.Description = desc + "\n" + tag;
-            _api.Database.Games.Update(game);
+            var updated = position == "top" ? tag + "\n" + desc : desc + "\n" + tag;
 
-            // Also update the cached rich description if one exists
-            if (_steamService?.HasCachedDescription(game.Id) == true)
+            // Also update the cached rich description, but only while it is the one
+            // being rendered — editing a superseded cache would hide the tag.
+            if (UpdateStoredDescription(game, updated))
             {
                 _steamService.UpdateCachedDescription(game.Id, tag, position);
             }
@@ -1044,79 +1263,71 @@ namespace PlayGif
                 _steamService = new SteamDescriptionService(basePath, () => _api.ApplicationSettings.Language);
             }
 
-            foreach (var game in games)
+            var storeName = store == "gog" ? "GOG" : "Steam";
+            var fetched = 0;
+            var unresolved = new List<string>();
+            var failed = new List<string>();
+
+            // One sequential pass behind a single progress dialog. Firing every
+            // request at once and reporting each result in its own dialog crashed
+            // Playnite on large selections: Steam rate-limits the burst and
+            // thousands of message boxes open at the same time.
+            _api.Dialogs.ActivateGlobalProgress((progressArgs) =>
             {
-                string storeId = null;
-                string storeName = store;
+                progressArgs.ProgressMaxValue = games.Count;
 
-                if (store == "steam")
+                for (int i = 0; i < games.Count; i++)
                 {
-                    storeId = _steamService.ResolveSteamAppId(game);
+                    if (progressArgs.CancelToken.IsCancellationRequested) break;
+
+                    var game = games[i];
+                    progressArgs.Text = $"Fetching {storeName} description: {game.Name} ({i + 1}/{games.Count})";
+
+                    var storeId = store == "gog"
+                        ? _steamService.ResolveGogProductId(game)
+                        : _steamService.ResolveSteamAppId(game);
+
                     if (string.IsNullOrEmpty(storeId))
                     {
-                        _api.Dialogs.ShowMessage(
-                            $"Could not resolve Steam AppId for: {game.Name}\n\n" +
-                            "Game must be from Steam library or have a Steam store link.",
-                            Constants.PluginName);
-                        continue;
+                        unresolved.Add(game.Name);
                     }
-                }
-                else if (store == "gog")
-                {
-                    storeId = _steamService.ResolveGogProductId(game);
-                    if (string.IsNullOrEmpty(storeId))
+                    else
                     {
-                        _api.Dialogs.ShowMessage(
-                            $"Could not resolve GOG product ID for: {game.Name}\n\n" +
-                            "Game must be from GOG library or have a GOG store link.",
-                            Constants.PluginName);
-                        continue;
+                        _steamService.ClearCachedDescription(game.Id);
+                        var html = (store == "gog"
+                            ? _steamService.FetchGogDescriptionAsync(game)
+                            : _steamService.GetRichDescriptionAsync(game)).GetAwaiter().GetResult();
+
+                        if (string.IsNullOrEmpty(html)) failed.Add($"{game.Name} (ID: {storeId})");
+                        else fetched++;
                     }
+
+                    progressArgs.CurrentProgressValue = i + 1;
                 }
+            }, new GlobalProgressOptions($"Fetching {storeName} descriptions...", true)
+            {
+                IsIndeterminate = false
+            });
 
-                _steamService.ClearCachedDescription(game.Id);
+            // A single successful fetch speaks for itself on screen
+            if (unresolved.Count > 0 || failed.Count > 0 || games.Count > 1)
+            {
+                string Names(List<string> names) =>
+                    "\n  " + string.Join("\n  ", names.Take(10)) +
+                    (names.Count > 10 ? $"\n  ...and {names.Count - 10} more" : "");
 
-                System.Threading.Tasks.Task<string> task;
-                if (store == "gog")
-                    task = _steamService.FetchGogDescriptionAsync(game);
-                else
-                    task = _steamService.GetRichDescriptionAsync(game);
-
-                var capturedGame = game;
-                var capturedId = storeId;
-                task.ContinueWith(t =>
-                {
-                    Application.Current.Dispatcher.BeginInvoke(new Action(() =>
-                    {
-                        var html = t.Result;
-                        if (string.IsNullOrEmpty(html))
-                        {
-                            _api.Dialogs.ShowMessage(
-                                $"Failed to fetch from {storeName} for: {capturedGame.Name} (ID: {capturedId})",
-                                Constants.PluginName);
-                            return;
-                        }
-
-                        if (Settings.EnableDebugMode)
-                        {
-                            var videoCount = System.Text.RegularExpressions.Regex.Matches(html, "<video").Count;
-                            var imgCount = System.Text.RegularExpressions.Regex.Matches(html, "<img").Count;
-                            _api.Dialogs.ShowMessage(
-                                $"Fetched from {storeName} for: {capturedGame.Name}\n" +
-                                $"Store ID: {capturedId}\n" +
-                                $"Size: {html.Length} chars\n" +
-                                $"Videos: {videoCount}  |  Images: {imgCount}",
-                                Constants.PluginName);
-                        }
-
-                        if (_lastSelectedGame?.Id == capturedGame.Id)
-                        {
-                            _lastSelectedGame = capturedGame;
-                            TryInjectAndRender(capturedGame);
-                        }
-                    }));
-                });
+                _api.Dialogs.ShowMessage(
+                    $"Fetched {fetched} of {games.Count} description(s) from {storeName}." +
+                    (unresolved.Count > 0
+                        ? $"\n\nNo {storeName} ID — the game must be from the {storeName} library " +
+                          $"or have a {storeName} store link:" + Names(unresolved)
+                        : "") +
+                    (failed.Count > 0 ? $"\n\nFailed to fetch:" + Names(failed) : ""),
+                    Constants.PluginName);
             }
+
+            if (_lastSelectedGame != null && games.Any(g => g.Id == _lastSelectedGame.Id))
+                TryInjectAndRender(_lastSelectedGame);
         }
 
         private void UpdateThemeColors()
@@ -1250,21 +1461,16 @@ namespace PlayGif
                 var section = Constants.MenuSectionName + "|Add media|" +
                     (pos == "top" ? "To top" : "To bottom");
 
+                // Web search first — it is the most-used way to add media
                 items.Add(new GameMenuItem
                 {
                     MenuSection = section,
-                    Description = "Local file",
+                    Description = "Search web images",
                     Action = (menuArgs) =>
                     {
                         var game = menuArgs.Games.FirstOrDefault();
                         if (game == null) return;
-
-                        var filePath = _api.Dialogs.SelectFile(
-                            "Media files|*.gif;*.mp4;*.webp;*.apng;*.avif;*.png;*.jpg|All files|*.*");
-                        if (string.IsNullOrEmpty(filePath)) return;
-
-                        var tag = CopyAndBuildMediaTag(game, filePath);
-                        if (tag != null) InsertMediaTag(game, tag, pos);
+                        SearchWebImages(game, pos);
                     }
                 });
 
@@ -1289,15 +1495,32 @@ namespace PlayGif
                 items.Add(new GameMenuItem
                 {
                     MenuSection = section,
-                    Description = "Search web images",
+                    Description = "Local file",
                     Action = (menuArgs) =>
                     {
                         var game = menuArgs.Games.FirstOrDefault();
                         if (game == null) return;
-                        SearchWebImages(game, pos);
+
+                        var filePath = _api.Dialogs.SelectFile(
+                            "Media files|*.gif;*.mp4;*.webp;*.apng;*.avif;*.png;*.jpg|All files|*.*");
+                        if (string.IsNullOrEmpty(filePath)) return;
+
+                        var tag = CopyAndBuildMediaTag(game, filePath);
+                        if (tag != null) InsertMediaTag(game, tag, pos);
                     }
                 });
             }
+
+            items.Add(new GameMenuItem
+            {
+                MenuSection = Constants.MenuSectionName,
+                Description = "Edit description...",
+                Action = (menuArgs) =>
+                {
+                    var game = menuArgs.Games.FirstOrDefault();
+                    if (game != null) EditDescription(game);
+                }
+            });
 
             items.Add(new GameMenuItem
             {
@@ -1313,10 +1536,27 @@ namespace PlayGif
             items.Add(new GameMenuItem
             {
                 MenuSection = Constants.MenuSectionName,
-                Description = "Refresh description",
+                Description = "Reset description",
                 Action = (menuArgs) =>
                 {
                     if (_cacheService == null) return;
+
+                    // This discards the cached description and every cached media
+                    // file, including anything added or edited by hand. Name and
+                    // wording say so, because it is not recoverable.
+                    var count = menuArgs.Games.Count;
+                    var confirm = _api.Dialogs.ShowMessage(
+                        (count == 1
+                            ? "Reset this game's description?\n\n"
+                            : $"Reset the description for {count} games?\n\n") +
+                        "This discards the cached description and all cached media, " +
+                        "including media you added and any changes made with " +
+                        "\"Edit description\". The description is re-fetched from the " +
+                        "store as you browse.\n\nThis cannot be undone.",
+                        Constants.PluginName,
+                        MessageBoxButton.YesNo);
+                    if (confirm != MessageBoxResult.Yes) return;
+
                     foreach (var game in menuArgs.Games)
                     {
                         _cacheService.ClearGameCache(game.Id);
@@ -1325,7 +1565,7 @@ namespace PlayGif
                     if (_renderer?.IsInitialized == true && _lastSelectedGame != null)
                         TryInjectAndRender(_lastSelectedGame);
                     _api.Dialogs.ShowMessage(
-                        "Description refreshed. Media will reload as you browse.",
+                        "Description reset. It will re-fetch as you browse.",
                         Constants.PluginName);
                 }
             });
@@ -1366,6 +1606,7 @@ namespace PlayGif
 
                     string cachedHtml = "";
                     var hasCached = _steamService?.HasCachedDescription(game.Id) == true;
+                    var cacheIsCurrent = hasCached && _steamService.IsCachedDescriptionCurrent(game);
                     if (hasCached)
                     {
                         var task = _steamService.GetRichDescriptionAsync(game);
@@ -1407,14 +1648,19 @@ namespace PlayGif
                         $"Playnite Game ID: {game.Id}\n" +
                         $"Plugin: {(game.PluginId == Guid.Empty ? "Manual" : game.PluginId.ToString())}\n" +
                         $"Steam AppId: {appId}  |  GOG ID: {gogId}\n" +
-                        $"PlayGif cache: {(hasCached ? "YES" : "none")}\n" +
+                        $"PlayGif cache: {(hasCached ? "YES" : "none")}" +
+                        (hasCached
+                            ? cacheIsCurrent
+                                ? "  |  in use\n"
+                                : "  |  superseded (stored description changed since it was cached)\n"
+                            : "\n") +
                         $"Cache folder: {cacheDir}\n" +
                         $"Cached files:\n  {cacheFiles}\n\n" +
                         AnalyzeHtml(storedHtml, "Stored Description") + "\n" +
                         (hasCached ? AnalyzeHtml(cachedHtml, "Cached Rich Description") : "");
 
                     var tempPath = System.IO.Path.Combine(
-                        System.IO.Path.GetTempPath(), $"PlayGif_Preview_{game.Name}.txt");
+                        System.IO.Path.GetTempPath(), $"PlayGif_Preview_{SanitizeFileName(game.Name ?? "")}.txt");
                     System.IO.File.WriteAllText(tempPath, msg);
                     System.Diagnostics.Process.Start(tempPath);
                 }

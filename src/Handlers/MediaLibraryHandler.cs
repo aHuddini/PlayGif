@@ -19,15 +19,20 @@ namespace PlayGif.Handlers
         private readonly IPlayniteAPI _api;
         private readonly Func<Guid, string> _gameDirProvider;
         private readonly Action<Game> _rerender;
+        private readonly Action<Game, string> _updateStoredDescription;
 
         public MediaLibraryHandler(
             IPlayniteAPI api,
             Func<Guid, string> gameDirProvider,
-            Action<Game> rerender)
+            Action<Game> rerender,
+            Action<Game, string> updateStoredDescription)
         {
             _api = api;
             _gameDirProvider = gameDirProvider;
             _rerender = rerender;
+            // Writing game.Description directly would supersede PlayGif's own cache,
+            // so stored-description edits go back through the plugin.
+            _updateStoredDescription = updateStoredDescription;
         }
 
         // Pick a media file and remove it from the game
@@ -178,8 +183,7 @@ namespace PlayGif.Handlers
                     node.ParentNode.RemoveChild(node);
 
                 RemoveEmptyMedia(doc);
-                game.Description = doc.DocumentNode.OuterHtml.Trim();
-                _api.Database.Games.Update(game);
+                _updateStoredDescription(game, doc.DocumentNode.OuterHtml.Trim());
                 return true;
             }
             catch (Exception ex)

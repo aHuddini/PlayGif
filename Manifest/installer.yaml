@@ -1,5 +1,24 @@
 AddonId: 'PlayGif.2e196d25-24d1-4db3-b732-9766c994a496'
 Packages:
+  - Version: 1.0.4
+    RequiredApiVersion: 6.16.0
+    ReleaseDate: 2026-10-21
+    PackageUrl: 'https://github.com/aHuddini/PlayGif/releases/download/1.0.4/PlayGif-1_0_4.pext'
+    Changelog:
+      - '[Critical Fix] Steam videos play for every game (issue #5). Some games, such as Cyberpunk 2077 and Valheim, have Steam MP4s in a format (HEVC) the renderer cannot decode. PlayGif still prefers MP4, but detects these and uses the WebM instead.'
+      - '[Critical Fix] Descriptions you or another extension change in Playnite are shown instead of an older cached store copy (issue #3).'
+      - '[Critical Fix] Fetching descriptions for many games at once no longer crashes Playnite. It runs one game at a time with a cancellable progress bar and one summary.'
+      - '[Critical Fix] Media added from web search no longer shows as an empty gap; the format is read from the download, not guessed from the address.'
+      - '[New Feature] Edit description: a visual editor where media plays while you edit. Insert media at the cursor, resize or remove it, format text, or edit raw HTML.'
+      - '[New Feature] Setting to keep descriptions written by you or an extension such as Metadata AI, instead of replacing them with the store description (issue #3).'
+      - '[New Feature] Web search previews MP4 and WebM results before you add them.'
+      - '[Performance] Only videos on screen play, instead of every video in the description at once.'
+      - '[Fixed] Preview description works for games with characters such as ":" in their name (issue #6).'
+      - '[Fixed] Imgur .gifv links work, and Playnite no longer stays dimmed after closing a PlayGif dialog.'
+      - '[Fixed] Fullscreen mode no longer blanks the theme''s description area.'
+      - '[Fixed] Switching games quickly no longer shows the previous description; new-tab links open in your browser; cancelling settings discards changes; theme font size applies in every language; the editor cannot save an empty description by mistake.'
+      - '[Improved] Scripts embedded in description text are removed before display.'
+      - '[Improved] "Refresh description" is now "Reset description" and asks first; web search shows each result''s format; Add media lists web search first.'
   - Version: 1.0.2
     RequiredApiVersion: 6.16.0
     ReleaseDate: 2026-08-03

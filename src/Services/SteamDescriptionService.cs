@@ -60,7 +60,7 @@ namespace PlayGif.Services
             var html = await FetchWithRetryAsync(appId);
             if (!string.IsNullOrEmpty(html))
             {
-                SaveCachedDescription(game.Id, html);
+                SaveCachedDescription(game, html);
                 Logger.Info($"Fetched and cached Steam description for: {game.Name} (AppId: {appId}, {html.Length} chars)");
             }
 
@@ -113,7 +113,7 @@ namespace PlayGif.Services
                         var html = FetchWithRetryAsync(appId).GetAwaiter().GetResult();
                         if (!string.IsNullOrEmpty(html))
                         {
-                            SaveCachedDescription(game.Id, html);
+                            SaveCachedDescription(game, html);
                             fetched++;
                         }
                         else
@@ -267,7 +267,7 @@ namespace PlayGif.Services
 
                 if (!string.IsNullOrEmpty(description))
                 {
-                    SaveCachedDescription(game.Id, description);
+                    SaveCachedDescription(game, description);
                     Logger.Info($"Fetched GOG description for: {game.Name} (ID: {productId}, {description.Length} chars)");
                 }
 
@@ -285,6 +285,31 @@ namespace PlayGif.Services
             return File.Exists(GetDescriptionCachePath(gameId));
         }
 
+        // The cached description is a derivative of the game's stored description
+        // at the moment it was cached. If the stored description has changed since
+        // — edited by the user, or rewritten by another metadata extension — that
+        // change is deliberate and the cache no longer describes the same text.
+        public bool IsCachedDescriptionCurrent(Game game)
+        {
+            if (!File.Exists(GetDescriptionCachePath(game.Id))) return false;
+
+            // An empty stored description overrules nothing, so the cache still applies.
+            var stored = game.Description ?? "";
+            if (stored.Length == 0) return true;
+
+            var path = GetBaselinePath(game.Id);
+            if (!File.Exists(path))
+            {
+                // Cached before baselines existed. Adopt the current text rather
+                // than discarding a cache the user has been happily looking at.
+                SaveBaseline(game);
+                return true;
+            }
+
+            try { return File.ReadAllText(path) == stored; }
+            catch { return true; }
+        }
+
         #region Cache
 
         // Descriptions are language-specific, so the cache has to be too. English
@@ -298,6 +323,36 @@ namespace PlayGif.Services
                 lang == null ? "_description.html" : $"_description.{lang}.html");
         }
 
+        // Deliberately not named _description*.html: the media-stripping and
+        // repair passes glob that pattern, and the baseline is a copy of the
+        // Playnite description rather than something we render.
+        private string GetBaselinePath(Guid gameId)
+        {
+            return Path.Combine(_cacheBasePath, gameId.ToString(), "_baseline.html");
+        }
+
+        // Records the stored description the cache was derived from.
+        public void SaveBaseline(Game game)
+        {
+            try
+            {
+                var path = GetBaselinePath(game.Id);
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllText(path, game.Description ?? "");
+            }
+            catch (Exception ex) { Logger.Error(ex, $"Failed to write description baseline for: {game.Name}"); }
+        }
+
+        private void DeleteBaseline(Guid gameId)
+        {
+            try
+            {
+                var path = GetBaselinePath(gameId);
+                if (File.Exists(path)) File.Delete(path);
+            }
+            catch { }
+        }
+
         private string LoadCachedDescription(Guid gameId)
         {
             var path = GetDescriptionCachePath(gameId);
@@ -309,12 +364,15 @@ namespace PlayGif.Services
             return null;
         }
 
-        public void SaveCachedDescription(Guid gameId, string html)
+        // Writing the cache also stamps the stored description it was derived
+        // from, so a later change to that description can be detected.
+        public void SaveCachedDescription(Game game, string html)
         {
-            var path = GetDescriptionCachePath(gameId);
+            var path = GetDescriptionCachePath(game.Id);
             var dir = Path.GetDirectoryName(path);
             Directory.CreateDirectory(dir);
             File.WriteAllText(path, html);
+            SaveBaseline(game);
         }
 
         public void UpdateCachedDescription(Guid gameId, string tag, string position)
@@ -343,6 +401,8 @@ namespace PlayGif.Services
                 try { File.Delete(f); }
                 catch (Exception ex) { Logger.Error(ex, $"Failed to delete {f}"); }
             }
+
+            DeleteBaseline(gameId);
         }
 
         public void ClearCachedDescription(Guid gameId)
@@ -353,6 +413,8 @@ namespace PlayGif.Services
                 try { File.Delete(path); }
                 catch { }
             }
+
+            DeleteBaseline(gameId);
         }
 
         #endregion
