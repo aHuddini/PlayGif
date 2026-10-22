@@ -85,6 +85,19 @@
         }
     }
 
+    // A source that loads but fails to decode (Steam's HEVC MP4s) is not a
+    // reason for the browser to try the next <source>, so do it here
+    function fallBackToNextSource() {
+        var sources = this.querySelectorAll('source');
+        for (var i = 0; i < sources.length - 1; i++) {
+            if (sources[i].src === this.currentSrc) {
+                this.src = sources[i + 1].src;
+                this.play().catch(function(){});
+                return;
+            }
+        }
+    }
+
     function setContent(html) {
         var el = document.getElementById('content');
         el.innerHTML = html;
@@ -108,6 +121,7 @@
         if (videos.length > 0 && !_posterOnly) {
             videos[0].preload = 'auto';
             videos[0].play().catch(function(){});
+            v.addEventListener('error', fallBackToNextSource);
         }
 
         // IntersectionObserver handles the rest based on visibility

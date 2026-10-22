@@ -38,7 +38,7 @@ namespace PlayGif.Services
 
             var gameDir = GetGameCacheDir(gameId);
             var toDownload = new List<(string url, string localPath)>();
-            var staleWebm = new List<(string webmPath, string keptPath)>();
+            var dropped = new List<(string droppedPath, string keptPath)>();
 
             // Rewrites one attribute to its cached local URL, or queues a download
             void Map(HtmlNode node, string attrName, string url)
@@ -88,7 +88,7 @@ namespace PlayGif.Services
             }
 
             // Pass 1: collapse each <video> to a single best <source>.
-            // Steam ships VP9 WebM first and H.264 MP4 second; keeping both means the
+            // Steam ships VP9 WebM first and MP4 second; keeping both means the
             // browser picks the WebM, so the MP4 gets cached and never played.
             foreach (var video in doc.DocumentNode.SelectNodes("//video") ?? Enumerable.Empty<HtmlNode>())
             {
@@ -99,23 +99,29 @@ namespace PlayGif.Services
                 var sources = video.SelectNodes(".//source[@src]");
                 if (sources == null || sources.Count == 0) continue;
 
-                var best = PickBestSource(sources);
+                var best = PickBestSource(sources, gameDir, out var keepFallback);
                 var bestUrl = best.GetAttributeValue("src", "");
 
                 // The replacement must already be on disk before we drop the old file
                 var keptPath = IsRemoteUrl(bestUrl)
                     ? Path.Combine(gameDir, GetCacheFilename(bestUrl)) : null;
 
+                if (keepFallback)
+                {
+                    // MP4 codec not known yet: try it first, and let the shell fall
+                    // back to the remaining source if it fails to decode
+                    best.Remove();
+                    video.PrependChild(best);
+                }
                 // Never prune a lone source — it may already be a local playgif.local URL
-                if (sources.Count > 1)
+                else if (sources.Count > 1)
                 {
                     foreach (var s in sources.Where(s => s != best).ToList())
                     {
                         // The dropped sibling may already be cached from an older version
                         var droppedUrl = s.GetAttributeValue("src", "");
-                        if (keptPath != null && IsRemoteUrl(droppedUrl) &&
-                            StripQuery(droppedUrl).EndsWith(".webm", StringComparison.OrdinalIgnoreCase))
-                            staleWebm.Add((Path.Combine(gameDir, GetCacheFilename(droppedUrl)), keptPath));
+                        if (keptPath != null && IsRemoteUrl(droppedUrl))
+                            dropped.Add((Path.Combine(gameDir, GetCacheFilename(droppedUrl)), keptPath));
 
                         s.Remove();
                     }
@@ -150,7 +156,7 @@ namespace PlayGif.Services
 
             RepairConvertedLocalRefs(doc, gameId, gameDir);
 
-            ReclaimStaleWebm(staleWebm, gameId);
+            ReclaimDroppedSources(dropped, gameId);
 
             // Auto-download uncached files only if setting is enabled
             if (toDownload.Count > 0 && _settings.AutoCacheMedia)
@@ -233,13 +239,67 @@ namespace PlayGif.Services
                 Logger.Info($"Repaired {repaired} converted media reference(s) for game {gameId}");
         }
 
-        // Prefers MP4 over WebM — H.264 is hardware-decoded far more widely than VP9
-        private static HtmlNode PickBestSource(IEnumerable<HtmlNode> sources)
+        // Prefers MP4: H.264 is hardware-decoded everywhere. But Steam encodes some
+        // games' MP4 as HEVC, which WebView2 fails to decode even with the Windows
+        // HEVC extension installed, leaving a blank player (issue #5). The codec is
+        // read from the cached file; HEVC loses to the WebM, which is VP9 and
+        // decodes everywhere. Until the MP4 is cached its codec is unknown, so the
+        // WebM is kept as a fallback (keepFallback) for the shell to switch to.
+        private HtmlNode PickBestSource(IEnumerable<HtmlNode> sources, string gameDir, out bool keepFallback)
         {
+            keepFallback = false;
             var list = sources.ToList();
-            return list.FirstOrDefault(s => EndsWith(s, ".mp4"))
-                ?? list.FirstOrDefault(s => EndsWith(s, ".webm"))
-                ?? list[0];
+            var mp4 = list.FirstOrDefault(s => EndsWith(s, ".mp4"));
+            var webm = list.FirstOrDefault(s => EndsWith(s, ".webm"));
+            if (mp4 == null || webm == null) return mp4 ?? webm ?? list[0];
+
+            var mp4Url = mp4.GetAttributeValue("src", "");
+            if (!IsRemoteUrl(mp4Url)) return mp4;
+
+            var mp4Path = Path.Combine(gameDir, GetCacheFilename(mp4Url));
+            if (File.Exists(mp4Path)) return IsHevc(mp4Path) ? webm : mp4;
+
+            // A cached WebM (or its conversion) is only on disk because the MP4
+            // lost, and that HEVC file has since been reclaimed. Re-trying the MP4
+            // would download it again on every render.
+            var webmUrl = webm.GetAttributeValue("src", "");
+            if (IsRemoteUrl(webmUrl))
+            {
+                var webmPath = Path.Combine(gameDir, GetCacheFilename(webmUrl));
+                if (File.Exists(webmPath) || File.Exists(Path.ChangeExtension(webmPath, ".mp4")))
+                    return webm;
+            }
+
+            keepFallback = true;
+            return mp4;
+        }
+
+        // An MP4's codec is named by its sample entry: avc1 for H.264, hvc1 or hev1
+        // for HEVC. Steam's files are faststart, so the moov box sits at the front.
+        // ponytail: reads only the head; a non-faststart HEVC file reads as H.264
+        // and falls through to the shell's decode-error fallback.
+        private readonly Dictionary<string, bool> _hevcByPath =
+            new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        private bool IsHevc(string mp4Path)
+        {
+            if (_hevcByPath.TryGetValue(mp4Path, out var known)) return known;
+
+            var hevc = false;
+            try
+            {
+                using (var fs = File.OpenRead(mp4Path))
+                {
+                    var buf = new byte[Math.Min(fs.Length, 256 * 1024)];
+                    var read = fs.Read(buf, 0, buf.Length);
+                    var head = Encoding.ASCII.GetString(buf, 0, read);
+                    hevc = !head.Contains("avc1") && (head.Contains("hvc1") || head.Contains("hev1"));
+                }
+            }
+            catch { }
+
+            _hevcByPath[mp4Path] = hevc;
+            return hevc;
         }
 
         private static bool EndsWith(HtmlNode source, string ext)
@@ -260,34 +320,37 @@ namespace PlayGif.Services
             return $"https://{Constants.VirtualHostName}/{gameId}/{filename}";
         }
 
-        // Deletes WebM cached by older versions once the MP4 that replaced it is on disk.
+        // Deletes a dropped source sibling once the source that replaced it, or its
+        // converted MP4, is on disk: a WebM cached by older versions, or an HEVC
+        // MP4 that lost to its WebM.
         // ponytail: only runs when a game is viewed — a game never opened keeps its stale
-        // WebM forever, which is fine for a cache.
-        private void ReclaimStaleWebm(List<(string webmPath, string keptPath)> candidates, Guid gameId)
+        // file forever, which is fine for a cache.
+        private void ReclaimDroppedSources(List<(string droppedPath, string keptPath)> candidates, Guid gameId)
         {
             var freed = 0L;
             var count = 0;
 
-            foreach (var (webmPath, keptPath) in candidates.Distinct())
+            foreach (var (droppedPath, keptPath) in candidates.Distinct())
             {
                 // Never delete while the replacement is still queued for download
-                if (!File.Exists(webmPath) || !File.Exists(keptPath)) continue;
+                if (!File.Exists(droppedPath)) continue;
+                if (!File.Exists(keptPath) && !File.Exists(Path.ChangeExtension(keptPath, ".mp4"))) continue;
 
                 try
                 {
-                    var size = new FileInfo(webmPath).Length;
-                    File.Delete(webmPath);
+                    var size = new FileInfo(droppedPath).Length;
+                    File.Delete(droppedPath);
                     freed += size;
                     count++;
                 }
                 catch (Exception ex)
                 {
-                    Logger.Error(ex, $"Failed to delete stale WebM: {webmPath}");
+                    Logger.Error(ex, $"Failed to delete dropped source: {droppedPath}");
                 }
             }
 
             if (count > 0)
-                Logger.Info($"Reclaimed {count} stale WebM ({freed / 1024} KB) for game {gameId}");
+                Logger.Info($"Reclaimed {count} dropped source file(s) ({freed / 1024} KB) for game {gameId}");
         }
 
         // Shared so callers reuse the pooled connection instead of creating an HttpClient per download
@@ -443,8 +506,9 @@ namespace PlayGif.Services
                     File.WriteAllBytes(localPath, bytes);
                     cacheSize += bytes.Length;
 
-                    // Only orphan WebM reach here — paired ones are dropped during rewrite.
-                    // No-op when FFmpeg is missing; the WebM just plays as-is.
+                    // Only WebM that won over an HEVC MP4, or had no MP4, reach here.
+                    // H.264 is hardware-decoded more widely than VP9. No-op when
+                    // FFmpeg is missing; the WebM just plays as-is.
                     if (localPath.EndsWith(".webm", StringComparison.OrdinalIgnoreCase))
                     {
                         var pathToConvert = localPath;
