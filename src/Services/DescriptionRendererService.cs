@@ -285,6 +285,7 @@ namespace PlayGif.Services
                         var value = new string(HtmlAgilityPack.HtmlEntity.DeEntitize(attr.Value)
                             .Where(c => c > ' ').ToArray());
                         if (attr.Name.StartsWith("on", StringComparison.OrdinalIgnoreCase) ||
+                            attr.Name.Equals("srcdoc", StringComparison.OrdinalIgnoreCase) ||
                             value.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase) ||
                             value.StartsWith("vbscript:", StringComparison.OrdinalIgnoreCase))
                             attr.Remove();
@@ -345,8 +346,20 @@ namespace PlayGif.Services
             using (var stream = assembly.GetManifestResourceStream(Constants.ShellPageResource))
             using (var reader = new StreamReader(stream))
             {
-                return reader.ReadToEnd();
+                return WithFreshNonce(reader.ReadToEnd());
             }
+        }
+
+        // The pages' CSP only runs script carrying this nonce. A fixed value is
+        // public in the source, and a srcdoc iframe parses its script normally
+        // rather than through innerHTML, so it could carry the nonce and run.
+        // Shared with the editor page.
+        public static string WithFreshNonce(string pageHtml)
+        {
+            var bytes = new byte[16];
+            using (var rng = System.Security.Cryptography.RandomNumberGenerator.Create())
+                rng.GetBytes(bytes);
+            return pageHtml.Replace("{{nonce}}", Convert.ToBase64String(bytes));
         }
 
         public void Dispose()

@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <!-- Only the nonce-tagged script below runs: handlers and javascript: URLs in a
-     description are refused however the HTML parses. ExecuteScriptAsync is exempt. -->
-<meta http-equiv="Content-Security-Policy" content="script-src 'nonce-playgif'; object-src 'none'; base-uri 'none'">
+     description are refused however the HTML parses. ExecuteScriptAsync is exempt.
+     {{nonce}} is replaced with a fresh random value on every load. -->
+<meta http-equiv="Content-Security-Policy" content="script-src 'nonce-{{nonce}}'; object-src 'none'; base-uri 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
     :root {
@@ -54,7 +55,7 @@
 </head>
 <body>
 <div id="content"></div>
-<script nonce="playgif">
+<script nonce="{{nonce}}">
     // Only play videos near the visible area — decoder load is the #1 cause of
     // scroll stalls. The WebView is sized to the whole description and the
     // host's ScrollViewer scrolls it, so the page considers every video on
