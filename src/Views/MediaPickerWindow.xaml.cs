@@ -72,9 +72,54 @@ namespace PlayGif.Views
 
             PreviewPlaceholder.Visibility = Visibility.Collapsed;
             PreviewImage.Visibility = Visibility.Visible;
+            AnimationBehavior.SetSourceUri(PreviewImage, null);
+            PreviewImage.Source = null;
+            PreviewVideo.Stop();
+            PreviewVideo.Source = null;
+            PreviewVideo.Visibility = Visibility.Collapsed;
 
-            // XamlAnimatedGif handles GIF animation natively
-            AnimationBehavior.SetSourceUri(PreviewImage, new Uri(item.FullUrl));
+            // Scraped URLs can be malformed; a throw here would reach Playnite's
+            // global handler, so every URL goes through TryCreate.
+            if (item.Format == "GIF" && Uri.TryCreate(item.FullUrl, UriKind.Absolute, out var gif))
+            {
+                // XamlAnimatedGif decodes GIF only
+                AnimationBehavior.SetSourceUri(PreviewImage, gif);
+                return;
+            }
+
+            // Shown alone for stills, and underneath a video until its first frame
+            // arrives — or for good, if Windows cannot decode it
+            if (Uri.TryCreate(item.ThumbUrl, UriKind.Absolute, out var thumb))
+                PreviewImage.Source = new System.Windows.Media.Imaging.BitmapImage(thumb);
+
+            // Media Foundation plays H.264 MP4 everywhere; WebM only with the VP9
+            // extension, and HEVC only with its extension. MediaFailed covers the rest.
+            var isVideo = item.Format == "MP4" || item.Format == "WEBM" || item.Format == "GIFV";
+            if (isVideo && Uri.TryCreate(Services.MediaCacheService.ResolveMediaUrl(item.FullUrl),
+                    UriKind.Absolute, out var video))
+            {
+                PreviewVideo.Source = video;
+                PreviewVideo.Visibility = Visibility.Visible;
+                PreviewVideo.Play();
+            }
+        }
+
+        private void PreviewVideo_MediaEnded(object sender, RoutedEventArgs e)
+        {
+            PreviewVideo.Position = TimeSpan.Zero;
+            PreviewVideo.Play();
+        }
+
+        private void PreviewVideo_MediaFailed(object sender, ExceptionRoutedEventArgs e)
+        {
+            PreviewVideo.Visibility = Visibility.Collapsed;
+        }
+
+        // Release the stream and decoder now rather than at finalization
+        protected override void OnClosed(EventArgs e)
+        {
+            PreviewVideo.Close();
+            base.OnClosed(e);
         }
 
         private void SelectButton_Click(object sender, RoutedEventArgs e)

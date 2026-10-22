@@ -63,6 +63,9 @@
                 <TextBlock x:Name="PreviewPlaceholder" Text="Select an image to preview"
                            Foreground="#555" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 <Image x:Name="PreviewImage" Stretch="Uniform" Visibility="Collapsed"/>
+                <MediaElement x:Name="PreviewVideo" Stretch="Uniform" Visibility="Collapsed"
+                              LoadedBehavior="Manual" UnloadedBehavior="Close" IsMuted="True"
+                              MediaEnded="PreviewVideo_MediaEnded" MediaFailed="PreviewVideo_MediaFailed"/>
             </Grid>
         </Border>
 
