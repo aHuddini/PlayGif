@@ -2,6 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="script-src 'nonce-playgif'; object-src 'none'; base-uri 'none'">
 <style>
     :root {
         --bg: #16161e;
@@ -91,7 +92,7 @@
 </head>
 <body>
 <div id="toolbar">
-    <select id="blockstyle" onchange="setBlock(this.value)" title="Paragraph style">
+    <select id="blockstyle" title="Paragraph style">
         <option value="p">Normal</option>
         <option value="h2">Heading</option>
         <option value="h3">Subheading</option>
@@ -99,59 +100,80 @@
     </select>
     <div class="sep"></div>
 
-    <button onclick="cmd('bold')" id="b-bold" title="Bold"><b>B</b></button>
-    <button onclick="cmd('italic')" id="b-italic" title="Italic"><i>I</i></button>
-    <button onclick="cmd('underline')" id="b-underline" title="Underline"><u>U</u></button>
+    <button data-cmd="bold" id="b-bold" title="Bold"><b>B</b></button>
+    <button data-cmd="italic" id="b-italic" title="Italic"><i>I</i></button>
+    <button data-cmd="underline" id="b-underline" title="Underline"><u>U</u></button>
 
     <div class="menu-wrap">
-        <button onclick="toggleMenu('colormenu')" title="Text colour">A&#9662;</button>
+        <button data-menu="colormenu" title="Text colour">A&#9662;</button>
         <div class="menu" id="colormenu">
             <div class="swatches" id="swatches"></div>
-            <button onclick="cmd('removeFormat'); closeMenus()">Clear formatting</button>
+            <button data-cmd="removeFormat" data-close>Clear formatting</button>
         </div>
     </div>
     <div class="sep"></div>
 
-    <button onclick="cmd('insertUnorderedList')" title="Bulleted list">&#8226;</button>
-    <button onclick="cmd('insertOrderedList')" title="Numbered list">1.</button>
-    <button onclick="cmd('justifyLeft')" title="Align left">&#8676;</button>
-    <button onclick="cmd('justifyCenter')" title="Centre">&#8596;</button>
-    <button onclick="cmd('justifyRight')" title="Align right">&#8677;</button>
+    <button data-cmd="insertUnorderedList" title="Bulleted list">&#8226;</button>
+    <button data-cmd="insertOrderedList" title="Numbered list">1.</button>
+    <button data-cmd="justifyLeft" title="Align left">&#8676;</button>
+    <button data-cmd="justifyCenter" title="Centre">&#8596;</button>
+    <button data-cmd="justifyRight" title="Align right">&#8677;</button>
     <div class="sep"></div>
 
-    <button onclick="makeLink()" title="Insert link">Link</button>
-    <button onclick="cmd('insertHorizontalRule')" title="Divider">&#8213;</button>
+    <button data-action="makeLink" title="Insert link">Link</button>
+    <button data-cmd="insertHorizontalRule" title="Divider">&#8213;</button>
 
     <div class="menu-wrap">
-        <button onclick="toggleMenu('insertmenu')" title="Insert media">+ Insert&#9662;</button>
+        <button data-menu="insertmenu" title="Insert media">+ Insert&#9662;</button>
         <div class="menu" id="insertmenu">
-            <button onclick="insertMedia('search')">Search web images...</button>
-            <button onclick="insertMedia('url')">From URL...</button>
-            <button onclick="insertMedia('file')">Local file...</button>
+            <button data-insert="search">Search web images...</button>
+            <button data-insert="url">From URL...</button>
+            <button data-insert="file">Local file...</button>
         </div>
     </div>
     <div class="sep"></div>
 
-    <button onclick="cmd('undo')" title="Undo">&#8630;</button>
-    <button onclick="cmd('redo')" title="Redo">&#8631;</button>
+    <button data-cmd="undo" title="Undo">&#8630;</button>
+    <button data-cmd="redo" title="Redo">&#8631;</button>
 
     <div class="spacer"></div>
     <span class="hint" id="hint">Click media to resize or remove it.</span>
-    <button onclick="toggleSource()" id="b-source" title="Edit raw HTML">&lt;/&gt; HTML</button>
+    <button data-action="toggleSource" id="b-source" title="Edit raw HTML">&lt;/&gt; HTML</button>
 </div>
 
 <div id="editor" contenteditable="true"></div>
 <textarea id="source" spellcheck="false"></textarea>
 
 <div id="mediabar">
-    <button onclick="scaleMedia(25)">25%</button>
-    <button onclick="scaleMedia(50)">50%</button>
-    <button onclick="scaleMedia(75)">75%</button>
-    <button onclick="scaleMedia(100)">100%</button>
-    <button class="danger" onclick="deleteMedia()">Delete</button>
+    <button data-scale="25">25%</button>
+    <button data-scale="50">50%</button>
+    <button data-scale="75">75%</button>
+    <button data-scale="100">100%</button>
+    <button class="danger" data-action="deleteMedia">Delete</button>
 </div>
 
-<script>
+<script nonce="playgif">
+    // Content-Security-Policy: only this nonce-tagged script runs, so handlers
+    // or javascript: URLs in a description are refused however the HTML parses.
+    // The toolbar is wired here for the same reason; onclick attributes would
+    // be refused too. Scoped to the toolbar and media bar so data- attributes
+    // in the content being edited cannot trigger anything.
+    document.addEventListener('click', function (e) {
+        var b = e.target.closest('#toolbar button, #mediabar button');
+        if (!b) return;
+        var d = b.dataset;
+        if (d.cmd) { cmd(d.cmd); if ('close' in d) closeMenus(); }
+        else if (d.menu) toggleMenu(d.menu);
+        else if (d.insert) insertMedia(d.insert);
+        else if (d.scale) scaleMedia(+d.scale);
+        else if (d.action === 'makeLink') makeLink();
+        else if (d.action === 'toggleSource') toggleSource();
+        else if (d.action === 'deleteMedia') deleteMedia();
+    });
+    document.getElementById('blockstyle').addEventListener('change', function () {
+        setBlock(this.value);
+    });
+
     var showingSource = false;
     var savedRange = null;
     var selectedMedia = null;

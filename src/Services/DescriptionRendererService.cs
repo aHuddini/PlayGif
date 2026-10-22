@@ -259,6 +259,8 @@ namespace PlayGif.Services
         // Descriptions come from stores, other extensions and the web, and are set
         // through innerHTML, which still runs inline handlers and javascript: URLs.
         // Shared with the editor, whose page can post messages back to the plugin.
+        // A first pass only: HtmlAgilityPack does not parse exactly as the browser
+        // does. The pages' Content-Security-Policy is what guarantees nothing runs.
         public static string StripScripts(string html)
         {
             if (string.IsNullOrEmpty(html)) return html;
