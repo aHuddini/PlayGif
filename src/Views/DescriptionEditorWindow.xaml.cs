@@ -98,7 +98,8 @@ namespace PlayGif.Views
                     await core.ExecuteScriptAsync($"setContent({escaped})");
                 };
 
-                core.NavigateToString(LoadEditorHtml());
+                core.NavigateToString(
+                    Services.DescriptionRendererService.WithFreshNonce(LoadEditorHtml()));
             }
             catch (Exception ex)
             {
