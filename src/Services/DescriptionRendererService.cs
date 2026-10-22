@@ -304,7 +304,9 @@ namespace PlayGif.Services
             var textHex = $"#{textColor.R:X2}{textColor.G:X2}{textColor.B:X2}";
             var linkHex = $"#{linkColor.R:X2}{linkColor.G:X2}{linkColor.B:X2}";
             _ = _webView.CoreWebView2.ExecuteScriptAsync(
-                $"setTheme('{textHex}', '{linkHex}', '{fontSize}px', '{fontFamily}', 'transparent')");
+                $"setTheme('{textHex}', '{linkHex}', " +
+                $"'{fontSize.ToString(System.Globalization.CultureInfo.InvariantCulture)}px', " +
+                $"{JsonConvert.SerializeObject(fontFamily)}, 'transparent')");
         }
 
         public void SetViewport(double top, double bottom)

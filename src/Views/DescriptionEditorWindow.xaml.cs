@@ -181,8 +181,18 @@ namespace PlayGif.Views
             try
             {
                 var json = await Editor.CoreWebView2.ExecuteScriptAsync("getContent()");
-                // ExecuteScriptAsync returns a JSON-encoded string
-                ResultHtml = JsonConvert.DeserializeObject<string>(json) ?? "";
+                // ExecuteScriptAsync returns a JSON-encoded string. "null" means
+                // getContent() threw in the page; saving it would wipe the description.
+                var html = JsonConvert.DeserializeObject<string>(json);
+                if (html == null)
+                {
+                    Logger.Error($"Editor returned no content: {json}");
+                    MessageBox.Show("Could not read the edited description. Nothing was saved.",
+                        Constants.PluginName, MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                ResultHtml = html;
                 DialogResult = true;
             }
             catch (Exception ex)

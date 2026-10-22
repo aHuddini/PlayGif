@@ -69,14 +69,14 @@ namespace PlayGif
         // Called when settings dialog opens
         public void BeginEdit() { }
 
-        // Called when user cancels — reload from disk
+        // Called when user cancels — reload from disk into the same instance. The
+        // services captured it at startup, so swapping in a new object left them
+        // running on the cancelled values until restart.
         public void CancelEdit()
         {
-            var saved = _plugin.LoadPluginSettings<PlayGifSettings>();
-            if (saved != null)
-            {
-                Settings = saved;
-            }
+            var saved = _plugin.LoadPluginSettings<PlayGifSettings>() ?? new PlayGifSettings();
+            JsonConvert.PopulateObject(JsonConvert.SerializeObject(saved), _settings);
+            NormalizeVideoScale();
         }
 
         // Called when user confirms — save to disk

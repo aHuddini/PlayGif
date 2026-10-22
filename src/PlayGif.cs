@@ -387,6 +387,10 @@ namespace PlayGif
                     }
                 }
 
+                // A store fetch above can outlast a newer selection; rendering now
+                // would replace that game's description with this one
+                if (_lastSelectedGame != null && _lastSelectedGame.Id != game.Id) return;
+
                 if (string.IsNullOrEmpty(html))
                 {
                     Logger.Info($"No description for: {game.Name}");
