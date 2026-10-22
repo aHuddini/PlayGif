@@ -1662,7 +1662,7 @@ namespace PlayGif
                         (hasCached ? AnalyzeHtml(cachedHtml, "Cached Rich Description") : "");
 
                     var tempPath = System.IO.Path.Combine(
-                        System.IO.Path.GetTempPath(), $"PlayGif_Preview_{game.Name}.txt");
+                        System.IO.Path.GetTempPath(), $"PlayGif_Preview_{SanitizeFileName(game.Name ?? "")}.txt");
                     System.IO.File.WriteAllText(tempPath, msg);
                     System.Diagnostics.Process.Start(tempPath);
                 }
