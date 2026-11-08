@@ -102,7 +102,10 @@ namespace PlayGif
                 _viewMonitor = new DescriptionViewMonitor(
                     () => _renderer.WebViewControl,
                     () => Settings.EnableAnimatedDescriptions,
-                    () => _api.MainView.ActiveDesktopView);
+                    // Fullscreen reports Details here regardless, which made every
+                    // fullscreen injection look stale and get torn out on each call
+                    () => _api.ApplicationInfo.Mode == ApplicationMode.Fullscreen
+                        ? (DesktopView?)null : _api.MainView.ActiveDesktopView);
 
                 // Switching Grid <-> Details tears down the view we injected into.
                 // Re-inject against whatever is on screen now, without waiting for
@@ -123,14 +126,15 @@ namespace PlayGif
 
                 // Playnite builds Grid view's details panel on demand, so at
                 // startup there is often nothing to inject into. Inject as soon
-                // as the element actually appears (issue #2).
+                // as the element actually appears (issue #2). Also covers a view
+                // or fullscreen page rebuilt under us: TryInjectAndRender detaches.
                 _viewMonitor.DescriptionAppeared += () =>
                 {
                     Application.Current.Dispatcher.BeginInvoke(
                         DispatcherPriority.Loaded,
                         new Action(() =>
                         {
-                            if (_viewMonitor.IsInjected) return;
+                            if (_viewMonitor.IsInjected && !_viewMonitor.IsStale()) return;
                             if (_lastSelectedGame == null) return;
                             TryInjectAndRender(_lastSelectedGame);
                         }));
@@ -156,9 +160,10 @@ namespace PlayGif
 
                 Logger.Info("Waiting for visual tree injection.");
 
-                // If a game was already selected, trigger injection + init
-                // But in fullscreen, wait for OnFullscreenViewChanged(Details) instead
-                if (_lastSelectedGame != null && !isFullscreen)
+                // If a game was already selected, trigger injection + init. In
+                // fullscreen the description usually isn't built yet, so this parks
+                // the renderer and warms it up before the details page first opens.
+                if (_lastSelectedGame != null)
                 {
                     Application.Current.Dispatcher.BeginInvoke(
                         DispatcherPriority.Loaded,
@@ -171,10 +176,14 @@ namespace PlayGif
             }
         }
 
+        // <ContentControl x:Name="PlayGif_AnimatedDescription"/> in a theme. The slot
+        // signals itself; services may not exist yet, so the monitor is read late.
         public override Control GetGameViewControl(GetGameViewControlArgs args)
         {
-            // Theme custom element path — not used in fallback mode
-            return null;
+            if (args.Name != Constants.CustomElementName) return null;
+            return new DescriptionHost(
+                slot => _viewMonitor?.SignalAppeared(slot),
+                slot => _viewMonitor?.SlotGone(slot));
         }
 
         public override void OnGameSelected(OnGameSelectedEventArgs args)
@@ -192,13 +201,18 @@ namespace PlayGif
                 return;
             }
 
-            // In fullscreen, don't try injection on game select — wait for detail view
-            if (_api.ApplicationInfo.Mode == ApplicationMode.Fullscreen && !_viewMonitor.IsInjected)
+            // In fullscreen, don't try injection on game select — wait for detail view.
+            // A parked renderer still re-renders, so the next open is ready.
+            var parked = _viewMonitor.IsParked;
+            if (_api.ApplicationInfo.Mode == ApplicationMode.Fullscreen && !_viewMonitor.IsInjected && !parked)
                 return;
 
+            // Parked means the description isn't built yet, and DescriptionAppeared
+            // reports when it is. Searching on every selection would cost each one
+            // a full tree walk (~7ms in Aniki ReMake) while browsing the list.
             Application.Current.Dispatcher.BeginInvoke(
                 DispatcherPriority.Loaded,
-                new Action(() => TryInjectAndRender(_lastSelectedGame)));
+                new Action(() => TryInjectAndRender(_lastSelectedGame, searchTree: !parked)));
         }
 
         public override void OnFullscreenViewChanged(OnFullscreenViewChangedArgs args)
@@ -213,6 +227,8 @@ namespace PlayGif
                 // Reset — the detail view template just expanded, tree has new elements
                 _injectionAttempts = 0;
                 _viewMonitor.ResetSearchState();
+                // Leaving details suspended playback, and nothing else resumes it
+                if (_viewMonitor.IsInjected) _renderer.ResumeAll();
                 Application.Current.Dispatcher.BeginInvoke(
                     DispatcherPriority.Loaded,
                     new Action(() => TryInjectAndRender(_lastSelectedGame)));
@@ -224,11 +240,13 @@ namespace PlayGif
             }
         }
 
-        private async void TryInjectAndRender(Game game)
+        private async void TryInjectAndRender(Game game, bool searchTree = true)
         {
             try
             {
                 if (_renderer?.WebViewControl == null) return;
+                // A theme's renderer slot can signal here even with fullscreen off
+                if (_api.ApplicationInfo.Mode == ApplicationMode.Fullscreen && !Settings.EnableInFullscreen) return;
 
                 // Registered on first render rather than at startup: the handlers run
                 // for every element Playnite loads and cannot be removed, so they
@@ -253,14 +271,24 @@ namespace PlayGif
                 // DescriptionAppeared re-drives this the moment the element shows up.
                 if (!_viewMonitor.IsInjected)
                 {
-                    _injectionAttempts++;
-                    if (_injectionAttempts <= 3 || _injectionAttempts % 25 == 0)
-                        Logger.Info($"Attempting visual tree injection (attempt {_injectionAttempts})...");
-                    _viewMonitor.TryInject(Application.Current.MainWindow, _renderer.WebViewControl);
-
-                    if (_viewMonitor.IsInjected)
+                    var wasParked = _viewMonitor.IsParked;
+                    if (searchTree)
                     {
-                        Logger.Info("Injection succeeded. Now initializing WebView2 core...");
+                        _injectionAttempts++;
+                        if (_injectionAttempts <= 3 || _injectionAttempts % 25 == 0)
+                            Logger.Info($"Attempting visual tree injection (attempt {_injectionAttempts})...");
+                        _viewMonitor.TryInject(Application.Current.MainWindow, _renderer.WebViewControl);
+                    }
+
+                    // Parking suspended playback; it is on screen now
+                    if (_viewMonitor.IsInjected && wasParked) _renderer.ResumeAll();
+
+                    if (!_viewMonitor.IsInjected && _api.ApplicationInfo.Mode == ApplicationMode.Fullscreen)
+                        _viewMonitor.Park(Application.Current.MainWindow, _renderer.WebViewControl);
+
+                    if ((_viewMonitor.IsInjected || _viewMonitor.IsParked) && !_renderer.IsInitialized)
+                    {
+                        Logger.Info("Renderer placed. Now initializing WebView2 core...");
                         await _renderer.InitializeAsync();
 
                         if (!_renderer.IsInitialized)
@@ -325,7 +353,7 @@ namespace PlayGif
 
                         Logger.Info("WebView2 fully initialized.");
                     }
-                    else
+                    else if (!_viewMonitor.IsInjected && !_viewMonitor.IsParked)
                     {
                         // Expected while the description panel does not exist yet.
                         // Throttled: this runs on every game selection until the
@@ -338,6 +366,10 @@ namespace PlayGif
 
                 // Step 2: Get the best description available
                 if (!_renderer.IsInitialized) return;
+
+                // Hidden, but the page would still play every video in it. The
+                // suspension outlasts new content until injection resumes it.
+                if (_viewMonitor.IsParked) _renderer.PauseAll();
 
                 var html = game.Description;
 

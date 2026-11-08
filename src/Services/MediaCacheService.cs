@@ -695,6 +695,9 @@ namespace PlayGif.Services
                     // A still WebP or APNG has nothing to gain from H.264
                     if ((ext == ".webp" || ext == ".apng") && !IsAnimated(file)) continue;
 
+                    // H.264 has no alpha channel
+                    if (ext == ".gif" && HasTransparentFirstFrame(file)) continue;
+
                     results.Add(file);
                 }
             }
@@ -703,6 +706,40 @@ namespace PlayGif.Services
         }
 
         // ffprobe reports more than one frame for animated content
+        // True when the GIF's first frame has a transparent colour. Converting would
+        // paint those pixels solid: GOG's section banners came out on white boxes.
+        // Only the first frame counts — optimizers mark later frames transparent to
+        // mean "unchanged from the last frame", which still composites opaque.
+        public static bool HasTransparentFirstFrame(string gifPath)
+        {
+            try
+            {
+                using (var r = new BinaryReader(File.OpenRead(gifPath)))
+                {
+                    r.ReadBytes(10);                  // signature, canvas width and height
+                    var packed = r.ReadByte();
+                    r.ReadBytes(2);                   // background index, aspect ratio
+                    if ((packed & 0x80) != 0)         // global colour table
+                        r.ReadBytes(3 << ((packed & 7) + 1));
+
+                    while (true)
+                    {
+                        // Anything but an extension (image 0x2C, trailer) means the
+                        // first frame had no graphic control block, so no transparency
+                        if (r.ReadByte() != 0x21) return false;
+                        if (r.ReadByte() == 0xF9)
+                        {
+                            r.ReadByte();             // block size, always 4
+                            return (r.ReadByte() & 1) != 0;
+                        }
+                        for (int size = r.ReadByte(); size > 0; size = r.ReadByte())
+                            r.ReadBytes(size);
+                    }
+                }
+            }
+            catch { return false; }
+        }
+
         private bool IsAnimated(string path)
         {
             try

@@ -62,12 +62,26 @@ namespace PlayGif.Services
             }
         }
 
+        // HwndHost asks for the size its window was created at, which for WebView2
+        // is nothing. Themes that size the description's container to its content
+        // (Aniki ReMake: HorizontalAlignment="Left") then lay it out 0px wide and
+        // it renders blank. Ask for the full width, as wrapping text would.
+        private sealed class FullWidthWebView2 : WebView2
+        {
+            protected override Size MeasureOverride(Size constraint)
+            {
+                var size = base.MeasureOverride(constraint);
+                if (!double.IsInfinity(constraint.Width)) size.Width = constraint.Width;
+                return size;
+            }
+        }
+
         // Create the WebView2 control (call on UI thread)
         public WebView2 CreateWebViewControl()
         {
             if (_webView != null) return _webView;
 
-            _webView = new WebView2();
+            _webView = new FullWidthWebView2();
             _webView.DefaultBackgroundColor = System.Drawing.Color.Transparent;
             _webView.Visibility = Visibility.Collapsed;
             _webView.Focusable = false;
@@ -78,7 +92,13 @@ namespace PlayGif.Services
         // Initialize after the control is in the visual tree
         public async Task InitializeAsync()
         {
-            if (_isInitialized || _isInitializing) return;
+            if (_isInitialized) return;
+            // A second caller (a selection while parked) waits for the first
+            if (_isInitializing)
+            {
+                await _initTcs.Task;
+                return;
+            }
             if (_environment == null)
             {
                 Logger.Error("Cannot initialize — environment not prepared.");
@@ -107,6 +127,7 @@ namespace PlayGif.Services
                 Logger.Error(ex, "Failed to initialize WebView2.");
                 _isInitialized = false;
                 _isInitializing = false;
+                _initTcs.TrySetResult(false);
             }
         }
 
