@@ -1,5 +1,14 @@
 AddonId: 'PlayGif.2e196d25-24d1-4db3-b732-9766c994a496'
 Packages:
+  - Version: 1.0.5
+    RequiredApiVersion: 6.16.0
+    ReleaseDate: 2026-11-07
+    PackageUrl: 'https://github.com/aHuddini/PlayGif/releases/download/1.0.5/PlayGif-1_0_5.pext'
+    Changelog:
+      - '[Performance] PlayGif no longer does work every time anything in Playnite lays itself out. Other extensions, theme animations and library scrolling are no longer slowed down by it.'
+      - '[Performance] Media downloads and store description fetches run in the background instead of on Playnite''s interface thread, and large videos are saved without holding them in memory.'
+      - '[Improved] Scrolling over a description feels the same as scrolling the rest of the page, and scrolling up no longer gets stuck. The description is now display-only, so its links can''t be clicked.'
+      - '[Known Issue] While scrolling, the description can trail the page very slightly. This is the cost of drawing it in its own window, which keeps video playback off Playnite''s interface thread. Locking it in place would put that work back on every frame, so the trade-off is kept.'
   - Version: 1.0.4
     RequiredApiVersion: 6.16.0
     ReleaseDate: 2026-10-21
