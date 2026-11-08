@@ -14,7 +14,7 @@ All notable changes to PlayGif will be documented in this file.
 - **The description is display-only.** The WebView2 HWND is disabled with `EnableWindow(false)` when injected. Windows skips disabled windows when hit-testing, so the mouse wheel reaches the theme's `ScrollViewer` directly and the description scrolls at the same speed and smoothing as the rest of the page. Previously Chromium caught the wheel and `shell.html` forwarded the raw `deltaY` (about 100px per notch, unsmoothed), which fought the theme's own scrolling and could make scrolling up feel stuck. Links and text selection in the description no longer respond. The JS wheel forwarding remains as a fallback for an injection that happens before the HWND exists.
 
 ### Known issue
-- **The description can trail the page by about a frame while scrolling.** It is drawn in its own native window, which WPF repositions on the UI thread while the rest of the page is composed on WPF's render thread; Windows presents the two at slightly different moments. Smooth scrolling makes this visible. The fix that locks it in place, `WebView2CompositionControl`, copies every rendered frame back into WPF on the UI thread — for descriptions that are constantly animating, that is per-frame UI work across all of Playnite, the cost this release removes. The separate window keeps video decoding and compositing off Playnite's UI thread, so it stays.
+- **The description may lag slightly behind the page while scrolling.** The WebView2 HWND is positioned on the UI thread while WPF composes on its render thread. `WebView2CompositionControl` would fix it, but copies every animated frame onto the UI thread, bringing back the performance issues this release removes.
 
 ## [1.0.4] - 2026-10-21
 

@@ -38,7 +38,7 @@ A performance release. PlayGif shares Playnite's interface with every other exte
 - **Scrolling feels natural.** Scrolling over a description now behaves exactly like scrolling the rest of the page, and scrolling up no longer gets stuck. The description is display-only, so its links can't be clicked.
 
 ### Known issue
-- **The description can trail the page very slightly while you scroll.** PlayGif draws the description in its own window, which keeps video playback off Playnite's interface thread. Locking it perfectly in place would mean copying every animated frame back into Playnite's interface, the same kind of slowdown this release removes. A barely visible lag while scrolling is the better trade.
+- **The description may lag slightly behind the page while scrolling.** Fixing it would bring back the performance issues this release removes.
 
 ### Previous Version
 - **v1.0.4**: Steam videos play for every game, your own descriptions are respected, a visual **Edit description** editor, and only on-screen videos play.
