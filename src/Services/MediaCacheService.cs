@@ -161,7 +161,9 @@ namespace PlayGif.Services
             // Auto-download uncached files only if setting is enabled
             if (toDownload.Count > 0 && _settings.AutoCacheMedia)
             {
-                _ = DownloadAllAsync(toDownload, gameId);
+                // Off the UI thread: the cache-size walk and file writes would
+                // otherwise run there between awaits
+                _ = Task.Run(() => DownloadAllAsync(toDownload, gameId));
             }
 
             return doc.DocumentNode.OuterHtml;
@@ -369,10 +371,10 @@ namespace PlayGif.Services
         {
             url = ResolveMediaUrl(url);
 
-            using (var response = await HttpClient.GetAsync(url))
+            using (var response = await HttpClient.GetAsync(url).ConfigureAwait(false))
             {
                 response.EnsureSuccessStatusCode();
-                var bytes = await response.Content.ReadAsByteArrayAsync();
+                var bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
 
                 var ext = ExtensionFromSignature(bytes)
                     ?? ExtensionFromContentType(response.Content.Headers.ContentType?.MediaType)
@@ -500,11 +502,25 @@ namespace PlayGif.Services
                     // Skip if already downloaded
                     if (File.Exists(localPath)) continue;
 
-                    var response = await HttpClient.GetAsync(url);
-                    response.EnsureSuccessStatusCode();
-                    var bytes = await response.Content.ReadAsByteArrayAsync();
-                    File.WriteAllBytes(localPath, bytes);
-                    cacheSize += bytes.Length;
+                    // Streamed through a temp file: buffering whole videos puts them on
+                    // the large object heap, whose collections pause every thread in
+                    // Playnite. The rename keeps a partial file from passing File.Exists.
+                    var partPath = localPath + ".part";
+                    try
+                    {
+                        using (var response = await HttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead))
+                        {
+                            response.EnsureSuccessStatusCode();
+                            using (var fs = File.Create(partPath))
+                                await response.Content.CopyToAsync(fs);
+                        }
+                        File.Move(partPath, localPath);
+                    }
+                    finally
+                    {
+                        try { if (File.Exists(partPath)) File.Delete(partPath); } catch { }
+                    }
+                    cacheSize += new FileInfo(localPath).Length;
 
                     // Only WebM that won over an HEVC MP4, or had no MP4, reach here.
                     // H.264 is hardware-decoded more widely than VP9. No-op when

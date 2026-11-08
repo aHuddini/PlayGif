@@ -138,8 +138,6 @@ namespace PlayGif
 
                 _viewMonitor.VisibleRangeChanged += (top, bottom) => _renderer.SetViewport(top, bottom);
 
-                _viewMonitor.StartMonitoring();
-
                 // Subscribe to window events
                 if (Application.Current?.MainWindow != null)
                 {
@@ -231,6 +229,11 @@ namespace PlayGif
             try
             {
                 if (_renderer?.WebViewControl == null) return;
+
+                // Registered on first render rather than at startup: the handlers run
+                // for every element Playnite loads and cannot be removed, so they
+                // stay out while the plugin is disabled or fullscreen is off
+                _viewMonitor.StartMonitoring();
 
                 // The view we injected into is torn down when the user switches
                 // between Grid and Details, or moves to another tab. Detach so the

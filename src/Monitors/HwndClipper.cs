@@ -18,6 +18,9 @@ namespace PlayGif.Monitors
         [DllImport("User32.dll", SetLastError = true)]
         private static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
 
+        [DllImport("User32.dll")]
+        private static extern bool EnableWindow(IntPtr hWnd, bool bEnable);
+
         [DllImport("Gdi32.dll")]
         private static extern IntPtr CreateRectRgn(int x1, int y1, int x2, int y2);
 
@@ -46,18 +49,20 @@ namespace PlayGif.Monitors
             // The WebView grows when content loads — without this the clip region
             // keeps the old, shorter rectangle and the extra text stays hidden
             _webView.SizeChanged += OnSizeChanged;
-            // Catches offset/layout shifts that raise no scroll or size event.
-            // Cheap: the region cache turns most of these into a no-op.
-            _webView.LayoutUpdated += OnLayoutUpdated;
+            // No LayoutUpdated: it fires for every layout pass in Playnite, not just
+            // this element's, so it taxed every other extension's UI. Content
+            // shifting above the WebView changes the extent, which ScrollChanged covers.
             // Initial clip after a short delay to let layout settle
             _webView.Dispatcher.BeginInvoke(
                 System.Windows.Threading.DispatcherPriority.Loaded,
-                new Action(() => UpdateClipRegion()));
-        }
-
-        private void OnLayoutUpdated(object sender, EventArgs e)
-        {
-            UpdateClipRegion();
+                new Action(() =>
+                {
+                    // Display-only. Windows skips a disabled HWND when hit-testing,
+                    // so the mouse and wheel reach WPF beneath it and the page
+                    // scrolls natively — same speed and smoothing as the rest of it
+                    if (_webView.Handle != IntPtr.Zero) EnableWindow(_webView.Handle, false);
+                    UpdateClipRegion();
+                }));
         }
 
         public void Detach()
@@ -68,10 +73,7 @@ namespace PlayGif.Monitors
                 _scrollViewer.SizeChanged -= OnSizeChanged;
             }
             if (_webView != null)
-            {
                 _webView.SizeChanged -= OnSizeChanged;
-                _webView.LayoutUpdated -= OnLayoutUpdated;
-            }
         }
 
         private void OnScrollChanged(object sender, ScrollChangedEventArgs e)
