@@ -57,7 +57,8 @@ namespace PlayGif.Services
                 return null;
             }
 
-            var html = await FetchWithRetryAsync(appId);
+            // Off the UI thread from here: JSON parsing and the cache write follow
+            var html = await FetchWithRetryAsync(appId).ConfigureAwait(false);
             if (!string.IsNullOrEmpty(html))
             {
                 SaveCachedDescription(game, html);
@@ -178,17 +179,17 @@ namespace PlayGif.Services
                     var lang = SteamLanguageCode();
                     var url = $"https://store.steampowered.com/api/appdetails?appids={appId}"
                         + (lang != null ? $"&l={lang}" : "");
-                    var response = await HttpClient.GetAsync(url);
+                    var response = await HttpClient.GetAsync(url).ConfigureAwait(false);
 
                     if (response.StatusCode == (HttpStatusCode)429)
                     {
                         Logger.Info($"Rate limited (429) for AppId {appId}, retry {attempt + 1}/{MaxRetries}...");
-                        await Task.Delay(RetryDelayMs);
+                        await Task.Delay(RetryDelayMs).ConfigureAwait(false);
                         continue;
                     }
 
                     response.EnsureSuccessStatusCode();
-                    var content = await response.Content.ReadAsStringAsync();
+                    var content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 
                     var json = JObject.Parse(content);
                     var appData = json[appId];
@@ -203,7 +204,7 @@ namespace PlayGif.Services
                 catch (HttpRequestException ex) when (attempt < MaxRetries - 1)
                 {
                     Logger.Info($"HTTP error for AppId {appId}, retry {attempt + 1}: {ex.Message}");
-                    await Task.Delay(RetryDelayMs);
+                    await Task.Delay(RetryDelayMs).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -260,7 +261,7 @@ namespace PlayGif.Services
                 var localeParam = string.IsNullOrWhiteSpace(locale) || locale == "english"
                     ? "" : $"&locale={locale.Replace('_', '-')}";
                 var url = $"https://api.gog.com/products/{productId}?expand=description{localeParam}";
-                var response = await HttpClient.GetStringAsync(url);
+                var response = await HttpClient.GetStringAsync(url).ConfigureAwait(false);
 
                 var json = JObject.Parse(response);
                 var description = json["description"]?["full"]?.ToString();

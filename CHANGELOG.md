@@ -2,6 +2,20 @@
 
 All notable changes to PlayGif will be documented in this file.
 
+## [1.0.5] - 2026-11-07
+
+### Performance
+- **PlayGif no longer runs on every layout pass in Playnite.** `HwndClipper` subscribed to `LayoutUpdated`, which WPF raises for every layout pass on the dispatcher, not just the WebView's. Each one ran `UpdateClipRegion`: two `TransformToAncestor` walks, a `TransformToDescendant`, `PresentationSource.FromVisual` and `GetDpi`. The region cache only skipped the final `SetWindowRgn`. Other extensions' layout work, theme storyboards and grid scrolling all paid for it, and a theme animating layout paid every frame. The clip now updates on `ScrollChanged` (which also fires on extent changes, so content shifting above the WebView is still covered), `SizeChanged` and the explicit `RefreshClip()` calls.
+- **Media downloads run off the UI thread and stream to disk.** `DownloadAllAsync` was started from the UI thread without `ConfigureAwait(false)`, so the cache-size directory walk and each `File.WriteAllBytes` ran on it, and every video was buffered whole into a `byte[]` on the large object heap, whose gen2 collections pause every thread in Playnite. It now runs under `Task.Run` and streams with `HttpCompletionOption.ResponseHeadersRead` + `CopyToAsync` into a `.part` file that is renamed on completion, so a failed download can no longer leave a partial file that passes `File.Exists`.
+- **Store fetches no longer resume on the UI thread.** `SteamDescriptionService` awaits use `ConfigureAwait(false)`, so parsing the appdetails JSON and writing the cache happen on the thread pool. This also removes a latent deadlock in **Preview description**, which blocks on `GetRichDescriptionAsync` with `GetResult()`.
+- **Visual-tree class handlers are registered on first render** instead of at startup. `EventManager.RegisterClassHandler` runs for every element Playnite loads and cannot be removed, so they now stay out entirely while animated descriptions are off or fullscreen support is disabled.
+
+### Changed
+- **The description is display-only.** The WebView2 HWND is disabled with `EnableWindow(false)` when injected. Windows skips disabled windows when hit-testing, so the mouse wheel reaches the theme's `ScrollViewer` directly and the description scrolls at the same speed and smoothing as the rest of the page. Previously Chromium caught the wheel and `shell.html` forwarded the raw `deltaY` (about 100px per notch, unsmoothed), which fought the theme's own scrolling and could make scrolling up feel stuck. Links and text selection in the description no longer respond. The JS wheel forwarding remains as a fallback for an injection that happens before the HWND exists.
+
+### Known issue
+- **The description can trail the page by about a frame while scrolling.** It is drawn in its own native window, which WPF repositions on the UI thread while the rest of the page is composed on WPF's render thread; Windows presents the two at slightly different moments. Smooth scrolling makes this visible. The fix that locks it in place, `WebView2CompositionControl`, copies every rendered frame back into WPF on the UI thread — for descriptions that are constantly animating, that is per-frame UI work across all of Playnite, the cost this release removes. The separate window keeps video decoding and compositing off Playnite's UI thread, so it stays.
+
 ## [1.0.4] - 2026-10-21
 
 ### Fixed

@@ -26,30 +26,22 @@ Built with the help of Claude Code
 
 https://github.com/user-attachments/assets/90acd659-e195-446f-aeab-e5349ae84fd7
 
-## What's New - v1.0.4
+## What's New - v1.0.5
 
-Includes everything from 1.0.3, which was not released on its own.
+A performance release. PlayGif shares Playnite's interface with every other extension and theme, and this version takes much less of it.
 
-### New
-- **Edit description.** Right-click a game → PlayGif → Edit description opens a visual editor where your GIFs and videos play while you edit. Insert media at the cursor from web search, a URL or a file, click any media to resize or remove it, and format text with headings, quotes, colour, alignment and lists. There's a raw HTML view too.
-- **Keep your own descriptions.** Turn off *Replace descriptions that have no media with the store description* in Settings → General, and PlayGif leaves descriptions written by you or another extension (such as Metadata AI) alone. Games with no description are still filled in.
-- **Video previews in web search.** MP4 and WebM results play in the picker, so you can see the clip before adding it.
-
-### Fixed
-- **Steam videos play for every game.** For some games (Cyberpunk 2077 and Valheim, for example) Steam's MP4 version is in a format the renderer can't play, so the video area stayed blank. PlayGif now spots these and switches to the other version Steam provides.
-- **Your own description now wins.** If you, or another extension, change a game's description after PlayGif fetched one, the new description is what you see. Fetch, Edit and Reset description put PlayGif back in charge.
-- **Fetching descriptions for many games at once no longer crashes Playnite.** It goes one game at a time with a progress bar you can cancel, and finishes with a single summary.
-- **Preview description** works for every game, including ones with a `:` in the name.
-- **Media added from web search no longer shows as an empty gap**, and Imgur `.gifv` links work.
-- **Playnite no longer stays dimmed** after closing a PlayGif dialog.
-- Quickly switching games no longer shows the previous game's description, links that open in a new tab go to your browser, and cancelling settings really discards your changes.
+### Performance
+- **Playnite stays responsive with PlayGif installed.** PlayGif used to do a little work every time anything in Playnite laid itself out, including other extensions, theme animations and library scrolling. It now only does work when the description itself moves or changes.
+- **Downloads and store fetches run in the background.** Saving videos and fetching Steam or GOG descriptions no longer happens on Playnite's interface thread, and large videos are saved without holding them in memory.
 
 ### Improved
-- **Smoother scrolling.** Only the videos you can see play; the rest wait until you scroll to them.
-- **"Refresh description" is now "Reset description"**, and asks before discarding cached media and edits.
+- **Scrolling feels natural.** Scrolling over a description now behaves exactly like scrolling the rest of the page, and scrolling up no longer gets stuck. The description is display-only, so its links can't be clicked.
+
+### Known issue
+- **The description can trail the page very slightly while you scroll.** PlayGif draws the description in its own window, which keeps video playback off Playnite's interface thread. Locking it perfectly in place would mean copying every animated frame back into Playnite's interface, the same kind of slowdown this release removes. A barely visible lag while scrolling is the better trade.
 
 ### Previous Version
-- **v1.0.2**: descriptions fetched in your language, **Convert cached media to MP4** and **Repair description links**, and a fix attempt for descriptions reverting to plain text after a restart.
+- **v1.0.4**: Steam videos play for every game, your own descriptions are respected, a visual **Edit description** editor, and only on-screen videos play.
 
 ---
 
