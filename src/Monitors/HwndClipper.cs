@@ -6,6 +6,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using Microsoft.Web.WebView2.Wpf;
 using Playnite.SDK;
+using PlayGif.Common;
 
 namespace PlayGif.Monitors
 {
@@ -30,6 +31,12 @@ namespace PlayGif.Monitors
         // Last region actually handed to SetWindowRgn, in HWND-local device pixels
         private Rect? _lastRegion;
 
+        // Hidden after appearing until its on-screen position holds still
+        private bool _settling;
+        private Rect _lastBounds;
+        private int _stillFrames;
+        private int _settleFrames;
+
         // The WebView is sized to the whole description, so the page itself thinks
         // everything is on screen. This reports the slice that really is, top to
         // bottom in WebView DIPs (equal to CSS px), whenever the clip changes.
@@ -49,6 +56,10 @@ namespace PlayGif.Monitors
             // The WebView grows when content loads — without this the clip region
             // keeps the old, shorter rectangle and the extra text stays hidden
             _webView.SizeChanged += OnSizeChanged;
+            _webView.IsVisibleChanged += OnIsVisibleChanged;
+            // A WebView moved in from parking, or from another view, arrives
+            // already visible, so no change will be raised for it
+            if (_webView.IsVisible) StartSettling();
             // No LayoutUpdated: it fires for every layout pass in Playnite, not just
             // this element's, so it taxed every other extension's UI. Content
             // shifting above the WebView changes the extent, which ScrollChanged covers.
@@ -73,7 +84,68 @@ namespace PlayGif.Monitors
                 _scrollViewer.SizeChanged -= OnSizeChanged;
             }
             if (_webView != null)
+            {
                 _webView.SizeChanged -= OnSizeChanged;
+                _webView.IsVisibleChanged -= OnIsVisibleChanged;
+            }
+            if (_settling)
+            {
+                _settling = false;
+                CompositionTarget.Rendering -= OnSettleFrame;
+            }
+        }
+
+        // Themes slide and zoom panels in with render transforms, which never cause
+        // a layout pass, so HwndHost leaves the HWND wherever the first frame of the
+        // animation put it, on top of the UI beside the panel. HWNDs ignore opacity
+        // too, so fades can't be followed either. Stay hidden until it holds still.
+        private void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+        {
+            if ((bool)e.NewValue) StartSettling();
+        }
+
+        private void StartSettling()
+        {
+            if (_settling) return;
+            _settling = true;
+            _stillFrames = 0;
+            _settleFrames = 0;
+            _lastBounds = Rect.Empty;
+
+            if (_webView.Handle != IntPtr.Zero)
+            {
+                SetWindowRgn(_webView.Handle, CreateRectRgn(0, 0, 0, 0), true);
+                _lastRegion = Rect.Empty;
+            }
+            CompositionTarget.Rendering += OnSettleFrame;
+        }
+
+        private void OnSettleFrame(object sender, EventArgs e)
+        {
+            var bounds = WindowBounds(_webView);
+            _stillFrames = bounds == _lastBounds ? _stillFrames + 1 : 0;
+            _lastBounds = bounds;
+            // ponytail: frame counts, not the theme's real animation length; an
+            // entrance longer than the cap shows the description before it ends
+            if (_stillFrames < Constants.SettleStillFrames &&
+                ++_settleFrames < Constants.SettleMaxFrames) return;
+
+            CompositionTarget.Rendering -= OnSettleFrame;
+            _settling = false;
+            _webView.UpdateWindowPos();
+            UpdateClipRegion();
+        }
+
+        // On-screen rectangle in window DIPs, render transforms included
+        private Rect WindowBounds(FrameworkElement e)
+        {
+            try
+            {
+                if (_window == null) _window = Window.GetWindow(_webView);
+                if (_window == null || !e.IsVisible) return Rect.Empty;
+                return e.TransformToAncestor(_window).TransformBounds(new Rect(e.RenderSize));
+            }
+            catch { return Rect.Empty; }
         }
 
         private void OnScrollChanged(object sender, ScrollChangedEventArgs e)
@@ -100,6 +172,8 @@ namespace PlayGif.Monitors
             {
                 if (_webView == null || _scrollViewer == null) return;
                 if (!_webView.IsLoaded) return;
+                // Shown when it settles; clipping now would reveal it mid-animation
+                if (_settling) return;
 
                 if (_window == null)
                     _window = Window.GetWindow(_webView);
@@ -111,15 +185,22 @@ namespace PlayGif.Monitors
                 var webViewHwnd = _webView.Handle;
                 if (webViewHwnd == IntPtr.Zero) return;
 
-                var svTransform = _scrollViewer.TransformToAncestor(_window);
-                var svRect = new Rect(
-                    svTransform.Transform(new Point(0, 0)),
-                    new Size(_scrollViewer.ViewportWidth, _scrollViewer.ViewportHeight));
+                // Bounds rather than origin + size: fullscreen lays out at 1080p and
+                // scales the whole UI to the screen, so sizes must be transformed too
+                var svRect = _scrollViewer.TransformToAncestor(_window).TransformBounds(
+                    new Rect(0, 0, _scrollViewer.ViewportWidth, _scrollViewer.ViewportHeight));
+                var wvRect = WindowBounds(_webView);
+                if (wvRect.IsEmpty) return;
 
-                var wvTransform = _webView.TransformToAncestor(_window);
-                var wvRect = new Rect(
-                    wvTransform.Transform(new Point(0, 0)),
-                    new Size(_webView.ActualWidth, _webView.ActualHeight));
+                // HwndHost sizes the HWND in scaled pixels, but the page would lay out
+                // and report its height in unscaled ones: text came out too large and
+                // the end of the description was cut off. Zoom the page to match.
+                if (_webView.ActualWidth > 0)
+                {
+                    var scale = wvRect.Width / _webView.ActualWidth;
+                    if (Math.Abs(_webView.ZoomFactor - scale) > 0.001)
+                        _webView.ZoomFactor = scale;
+                }
 
                 var intersect = Rect.Intersect(svRect, wvRect);
 
@@ -134,21 +215,22 @@ namespace PlayGif.Monitors
                 }
                 else
                 {
-                    // Region coordinates are HWND-local. Scrolling moves the WebView, so
-                    // the same window-space intersection maps to a different local rect —
-                    // the comparison must happen after this transform, not before it.
-                    var localTransform = _window.TransformToDescendant(_webView);
-                    var localRect = localTransform.TransformBounds(intersect);
-
+                    // Region coordinates are HWND-local device pixels, and the HWND sits
+                    // exactly on wvRect. Scrolling moves the WebView, so the same window-
+                    // space intersection maps to a different local rect — the comparison
+                    // must happen after this conversion, not before it.
                     var dpi = VisualTreeHelper.GetDpi(_webView);
                     var region = new Rect(
-                        (int)(localRect.X * dpi.DpiScaleX),
-                        (int)(localRect.Y * dpi.DpiScaleY),
-                        (int)(localRect.Width * dpi.DpiScaleX),
-                        (int)(localRect.Height * dpi.DpiScaleY));
+                        (int)((intersect.X - wvRect.X) * dpi.DpiScaleX),
+                        (int)((intersect.Y - wvRect.Y) * dpi.DpiScaleY),
+                        (int)(intersect.Width * dpi.DpiScaleX),
+                        (int)(intersect.Height * dpi.DpiScaleY));
 
                     if (_lastRegion.HasValue && region == _lastRegion.Value) return;
                     _lastRegion = region;
+
+                    // In WebView DIPs, which the zoom above keeps equal to CSS px
+                    var localRect = _window.TransformToDescendant(_webView).TransformBounds(intersect);
 
                     var rgn = CreateRectRgn(
                         (int)region.X,

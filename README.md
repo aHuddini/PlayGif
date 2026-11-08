@@ -26,22 +26,25 @@ Built with the help of Claude Code
 
 https://github.com/user-attachments/assets/90acd659-e195-446f-aeab-e5349ae84fd7
 
-## What's New - v1.0.5
+## What's New - v1.1.0
 
-A performance release. PlayGif shares Playnite's interface with every other extension and theme, and this version takes much less of it.
+Fullscreen mode works properly, and themes can now choose where descriptions go.
 
-### Performance
-- **Playnite stays responsive with PlayGif installed.** PlayGif used to do a little work every time anything in Playnite laid itself out, including other extensions, theme animations and library scrolling. It now only does work when the description itself moves or changes.
-- **Downloads and store fetches run in the background.** Saving videos and fetching Steam or GOG descriptions no longer happens on Playnite's interface thread, and large videos are saved without holding them in memory.
+### Fullscreen
+- **Descriptions fit their panel at any screen resolution.** Text is sized to match the theme, nothing spills over the surrounding UI, and the whole description scrolls into view.
+- **Descriptions are found in themes that build their pages as they open**, such as Aniki ReMake, with no theme workarounds needed.
+- **Descriptions are ready the first time you open them.** PlayGif prepares the selected game's description in the background, and shows it once the theme's slide-in animation finishes instead of partway through.
+- **Videos resume** when you reopen a game's details.
 
-### Improved
-- **Scrolling feels natural.** Scrolling over a description now behaves exactly like scrolling the rest of the page, and scrolling up no longer gets stuck. The description is display-only, so its links can't be clicked.
+### Fixed
+- **Transparent GIFs no longer get white boxes** when converting cached media to MP4. GIFs with see-through areas, such as the section banners in GOG descriptions, are now kept as they are.
+- **Clips are no longer stretched** past their real size, which made them look blurry in wide description panels.
 
-### Known issue
-- **The description may move slightly out of sync with the page while scrolling.** Keeping it perfectly in sync would bring back the performance issues this release removes.
+### For theme authors
+- **Place the description renderer yourself** with `PlayGif_AnimatedDescription`, and style around it. See the [Theme Integration Guide](docs/THEME_INTEGRATION.md).
 
 ### Previous Version
-- **v1.0.4**: Steam videos play for every game, your own descriptions are respected, a visual **Edit description** editor, and only on-screen videos play.
+- **v1.0.5**: Playnite stays responsive with PlayGif installed, downloads run in the background, and scrolling over a description feels natural.
 
 ---
 
@@ -97,6 +100,8 @@ Library-wide options live in **Settings → PlayGif → General**:
 | **Repair description links** | Points descriptions at converted files, and clears links whose media is gone. Runs automatically after converting |
 
 If descriptions do not render correctly in your theme, open **Settings → PlayGif → Theme Support** and run the layout report — it records what PlayGif found in your theme's panel, which is what a bug report needs.
+
+Theme authors: the [Theme Integration Guide](docs/THEME_INTEGRATION.md) covers what PlayGif needs from a theme's layout, what it handles automatically in Desktop and Fullscreen, and its limits.
 
 ---
 

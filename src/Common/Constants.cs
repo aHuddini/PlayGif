@@ -36,11 +36,20 @@ namespace PlayGif.Common
         #region Visual Tree
 
         public const string HtmlDescriptionPartName = "PART_HtmlDescription";
+        // Inside DescriptionHost, the slot a theme places with CustomElementName
+        public const string HostSlotName = "PlayGif_RendererSlot";
         public const string DescriptionPanelPartName = "PART_ElemDescription";
         public const string FullscreenScrollPartName = "PART_ScrollHtmlDescription";
         // Some themes use non-standard names
         public static readonly string[] AlternateDescriptionNames =
             { "DescriptionText", "PART_Description" };
+        // Playnite's description control, shared by Desktop and Fullscreen
+        public const string HtmlTextViewTypeName = "Playnite.Controls.HtmlTextView, Playnite";
+
+        // After the description appears it stays hidden until it holds still this
+        // many frames, waiting at most the second figure for a theme's entrance
+        public const int SettleStillFrames = 3;
+        public const int SettleMaxFrames = 120;
 
         public const string ProjectUrl = "https://github.com/aHuddini/PlayGif";
         public const string IssuesUrl = "https://github.com/aHuddini/PlayGif/issues";

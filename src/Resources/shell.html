@@ -121,6 +121,10 @@
             v.removeAttribute('crossorigin');
             v.removeAttribute('width');
             v.removeAttribute('height');
+            // Inline sizes too: GOG stretches its 600px clips with width:100%,
+            // blurring them in wide panels. The stylesheet already fits them.
+            v.style.removeProperty('width');
+            v.style.removeProperty('height');
             v.onended = function() {
                 this.currentTime = 0;
                 this.play().catch(function(){});

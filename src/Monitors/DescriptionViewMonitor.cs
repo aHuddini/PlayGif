@@ -15,7 +15,8 @@ namespace PlayGif.Monitors
 
         private readonly Func<WebView2> _webViewProvider;
         private readonly Func<bool> _isEnabled;
-        private readonly Func<DesktopView> _activeViewProvider;
+        // Null in Fullscreen, which has no Desktop view hosts
+        private readonly Func<DesktopView?> _activeViewProvider;
         private bool _isHooked;
         private bool _loggedMissing;
         private FrameworkElement _hiddenHtmlTextView;
@@ -25,6 +26,10 @@ namespace PlayGif.Monitors
         private HwndClipper _clipper;
 
         public bool IsInjected => _hiddenHtmlTextView != null;
+        public bool IsParked => _parking != null && ReferenceEquals(_webViewProvider()?.Parent, _parking);
+
+        // Hidden zero-size holder for the WebView until the description exists
+        private Grid _parking;
         public ScrollViewer ParentScrollViewer => _parentScrollViewer;
 
         // Content changes don't always resize the WebView, so the clip region can
@@ -39,7 +44,7 @@ namespace PlayGif.Monitors
         public DescriptionViewMonitor(
             Func<WebView2> webViewProvider,
             Func<bool> isEnabled,
-            Func<DesktopView> activeViewProvider)
+            Func<DesktopView?> activeViewProvider)
         {
             _webViewProvider = webViewProvider;
             _isEnabled = isEnabled;
@@ -69,11 +74,19 @@ namespace PlayGif.Monitors
                 new RoutedEventHandler(OnWindowLoaded));
 
             // The description element can appear long after startup: Playnite
-            // creates the Grid view details panel on demand, and themes may nest
-            // it in a lazily-realized TabItem. Watch both directions.
-            EventManager.RegisterClassHandler(typeof(FrameworkElement),
-                FrameworkElement.LoadedEvent,
-                new RoutedEventHandler(OnElementLoaded));
+            // creates the Grid view details panel on demand, themes may nest it in
+            // a lazily-realized TabItem, and fullscreen themes build pages when
+            // they open. A Loaded class handler never saw any of these: WPF only
+            // raises Loaded on elements with their own handler for it. SizeChanged
+            // is raised for every element, and registered on the description's
+            // own type it costs nothing anywhere else.
+            var htmlTextView = Type.GetType(Constants.HtmlTextViewTypeName);
+            if (htmlTextView != null)
+                EventManager.RegisterClassHandler(htmlTextView,
+                    FrameworkElement.SizeChangedEvent,
+                    new SizeChangedEventHandler(OnDescriptionSizeChanged));
+            else
+                Logger.Error($"{Constants.HtmlTextViewTypeName} not found; late descriptions need a game selection to appear.");
 
             EventManager.RegisterClassHandler(typeof(FrameworkElement),
                 FrameworkElement.UnloadedEvent,
@@ -82,26 +95,41 @@ namespace PlayGif.Monitors
             _isHooked = true;
         }
 
-        private void OnElementLoaded(object sender, RoutedEventArgs e)
+        private void OnDescriptionSizeChanged(object sender, SizeChangedEventArgs e)
         {
-            // Cheap rejection first — this fires for every element in the app
-            if (_hiddenHtmlTextView != null) return;
+            // Its first layout is its arrival — collapsed or not-yet-built elements
+            // have no width. Later resizes are not.
+            if (e.PreviousSize.Width > 0 || e.NewSize.Width <= 0) return;
             if (!(sender is FrameworkElement fe)) return;
+            if (fe.Name != Constants.HtmlDescriptionPartName &&
+                Array.IndexOf(Constants.AlternateDescriptionNames, fe.Name) < 0) return;
 
-            var name = fe.Name;
-            if (string.IsNullOrEmpty(name)) return;
-            if (name != Constants.HtmlDescriptionPartName &&
-                name != Constants.DescriptionPanelPartName) return;
+            SignalAppeared(fe);
+        }
 
+        // A theme's DescriptionHost slot left the tree; only matters if we are in it
+        public void SlotGone(FrameworkElement slot)
+        {
+            if (!ReferenceEquals(slot, _hiddenHtmlTextView)) return;
+            Logger.Info("Theme renderer slot unloaded — signalling re-injection.");
+            InjectionLost?.Invoke();
+        }
+
+        // Also called by DescriptionHost when a theme's slot loads
+        public void SignalAppeared(FrameworkElement fe)
+        {
+            if (ReferenceEquals(fe, _hiddenHtmlTextView)) return;
             if (!_isEnabled()) return;
 
-            // WPF re-raises Loaded when an element is re-parented, and both the
-            // panel and the text view match, so the same arrival can fire several
-            // times. Only signal for the first one until injection settles.
+            // A theme that rebuilds its page leaves us injected into the old one
+            if (IsInjected && !IsStale()) return;
+
+            // Re-showing the same element (a panel toggled again) is not a new
+            // arrival. Only signal for the first one until injection settles.
             if (ReferenceEquals(fe, _lastSignalledElement)) return;
             _lastSignalledElement = fe;
 
-            Logger.Info($"Description element '{name}' appeared — signalling injection.");
+            Logger.Info($"Description element '{fe.Name}' appeared — signalling injection.");
             DescriptionAppeared?.Invoke();
         }
 
@@ -214,11 +242,38 @@ namespace PlayGif.Monitors
             _lastSignalledElement = null;
         }
 
+        // Fullscreen themes often build the description only when its page first
+        // opens. HwndHost creates its HWND as soon as it is in a window, hidden or
+        // not, so parked here the core can start and the description render ahead
+        // of time; that first open then only has to move it.
+        public bool Park(DependencyObject root, WebView2 webView)
+        {
+            if (IsParked && PresentationSource.FromVisual(_parking) != null) return true;
+            if (webView.Parent != null && !IsParked) return false;
+
+            // A Grid, because other panels give every child a slot of its own
+            var host = FindFirst<Grid>(root);
+            if (host == null) return false;
+
+            if (_parking == null)
+                _parking = new Grid { Width = 0, Height = 0, Visibility = Visibility.Hidden };
+            (_parking.Parent as Panel)?.Children.Remove(_parking);
+            host.Children.Insert(0, _parking);
+            if (webView.Parent == null) _parking.Children.Add(webView);
+
+            Logger.Info("Description not built yet — renderer parked so it is ready when it is.");
+            return true;
+        }
+
         public void TryInject(DependencyObject root, WebView2 webView)
         {
-            if (webView.Parent != null) return;
+            if (webView.Parent != null && !IsParked) return;
 
-            var htmlTextView = FindVisibleByName(root, Constants.HtmlDescriptionPartName);
+            // A theme-placed slot wins: the theme chose where the renderer goes.
+            // ponytail: only at injection time; a slot loading after we injected
+            // into PART_HtmlDescription waits for the next re-injection
+            var htmlTextView = FindVisibleByName(root, Constants.HostSlotName)
+                ?? FindVisibleByName(root, Constants.HtmlDescriptionPartName);
 
             if (htmlTextView == null)
             {
@@ -281,6 +336,7 @@ namespace PlayGif.Monitors
             Grid.SetColumnSpan(webView, Grid.GetColumnSpan(child));
             DockPanel.SetDock(webView, DockPanel.GetDock(child));
 
+            _parking?.Children.Remove(webView);
             panel.Children.Insert(panel.Children.IndexOf(child) + 1, webView);
 
             // Clip the HWND to prevent airspace overflow
@@ -340,6 +396,20 @@ namespace PlayGif.Monitors
             {
                 if (parent is T match) return match;
                 parent = VisualTreeHelper.GetParent(parent);
+            }
+            return null;
+        }
+
+        private static T FindFirst<T>(DependencyObject parent) where T : DependencyObject
+        {
+            if (parent == null) return null;
+            int count = VisualTreeHelper.GetChildrenCount(parent);
+            for (int i = 0; i < count; i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is T match) return match;
+                var found = FindFirst<T>(child);
+                if (found != null) return found;
             }
             return null;
         }
@@ -452,7 +522,7 @@ namespace PlayGif.Monitors
             {
                 Logger.Info("===== PlayGif injection diagnostics =====");
                 string activeView;
-                try { activeView = _activeViewProvider().ToString(); }
+                try { activeView = _activeViewProvider()?.ToString() ?? "none (fullscreen)"; }
                 catch (Exception ex) { activeView = "unavailable: " + ex.Message; }
                 Logger.Info($"[active view] {activeView} -> host {ActiveViewHostName() ?? "unknown"}");
 

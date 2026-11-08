@@ -1,5 +1,18 @@
 AddonId: 'PlayGif.2e196d25-24d1-4db3-b732-9766c994a496'
 Packages:
+  - Version: 1.1.0
+    RequiredApiVersion: 6.16.0
+    ReleaseDate: 2026-11-08
+    PackageUrl: 'https://github.com/aHuddini/PlayGif/releases/download/1.1.0/PlayGif-1_1_0.pext'
+    Changelog:
+      - '[Critical Fix] Fullscreen descriptions fit their panel at any screen resolution. They no longer spill over the surrounding UI, render too large, or get cut off at the end.'
+      - '[Critical Fix] Fullscreen descriptions are found in themes that build their pages as they open, such as Aniki ReMake, and no longer show blank in panels sized to their content.'
+      - '[Improved] Fullscreen descriptions are prepared in the background, so they are ready the first time a game''s details open, and appear once the theme''s slide-in animation finishes instead of partway through it.'
+      - '[Fixed] Converting cached media to MP4 keeps GIFs with transparent areas as they are, instead of putting them on white boxes. Already-converted ones are restored by Reset description.'
+      - '[Fixed] Clips are no longer stretched past their real size in wide description panels.'
+      - '[Fixed] Videos resume when you reopen a game''s details in Fullscreen.'
+      - '[Performance] Browsing games in Fullscreen no longer rebuilds the description on every selection.'
+      - '[New Feature] Themes can place the description renderer themselves with PlayGif_AnimatedDescription and style around it. See the Theme Integration Guide on GitHub.'
   - Version: 1.0.5
     RequiredApiVersion: 6.16.0
     ReleaseDate: 2026-11-07
